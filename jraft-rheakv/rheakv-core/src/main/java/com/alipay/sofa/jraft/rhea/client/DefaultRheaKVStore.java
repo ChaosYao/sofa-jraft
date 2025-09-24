@@ -16,6 +16,7 @@
  */
 package com.alipay.sofa.jraft.rhea.client;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -1015,6 +1016,7 @@ public class DefaultRheaKVStore implements RheaKVStore {
         final FailoverClosure<Boolean> closure = new FailoverClosureImpl<>(future, retriesLeft, retryRunner);
         if (regionEngine != null) {
             if (ensureOnValidEpoch(region, regionEngine, closure)) {
+                LOG.info("** Direct save data to region {}, {}.", Arrays.toString(key), Arrays.toString(value));
                 getRawKVStore(regionEngine).put(key, value, closure);
             }
         } else {
@@ -1023,6 +1025,7 @@ public class DefaultRheaKVStore implements RheaKVStore {
             request.setValue(value);
             request.setRegionId(region.getId());
             request.setRegionEpoch(region.getRegionEpoch());
+            LOG.info("** Start to save data by rpcService {}, {}", Arrays.toString(key), Arrays.toString(value));
             this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
         }
     }
