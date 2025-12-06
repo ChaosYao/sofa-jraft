@@ -101,6 +101,8 @@
                                     <mainClass>com.alipay.sofa.jraft.benchmark.BenchmarkBootstrap</mainClass>
                                     <!-- 如果跑 counter 示例则：com.alipay.jraft.example.counter.CounterServer -->
                                 </transformer>
+                                <!-- 合并多个 JAR 中的 META-INF/services 文件 -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>
