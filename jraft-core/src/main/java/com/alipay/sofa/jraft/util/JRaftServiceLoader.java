@@ -94,6 +94,7 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
         Class<S> first = null;
         while (it.hasNext()) {
             final Class<S> cls = it.next();
+            LOG.info("SPI service [{}] found implementation: {}", this.service.getName(), cls.getName());
             if (first == null) {
                 first = cls;
             } else {
@@ -102,6 +103,9 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
 
                 final int currPriority = currSpi == null ? 0 : currSpi.priority();
                 final int nextPriority = nextSpi == null ? 0 : nextSpi.priority();
+
+                LOG.info("SPI service [{}] comparing priorities: {} (priority={}) vs {} (priority={})", 
+                    this.service.getName(), first.getName(), currPriority, cls.getName(), nextPriority);
 
                 if (nextPriority > currPriority) {
                     first = cls;
@@ -112,6 +116,8 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
         if (first == null) {
             throw fail(this.service, "could not find any implementation for class");
         }
+
+        LOG.info("SPI service [{}] selected implementation: {}", this.service.getName(), first.getName());
 
         final S ins = this.providers.get(first.getName());
         if (ins != null) {
@@ -302,10 +308,27 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
             if (this.configs == null) {
                 try {
                     final String fullName = PREFIX + this.service.getName();
+                    Enumeration<URL> resources;
                     if (this.loader == null) {
-                        this.configs = ClassLoader.getSystemResources(fullName);
+                        resources = ClassLoader.getSystemResources(fullName);
                     } else {
-                        this.configs = this.loader.getResources(fullName);
+                        resources = this.loader.getResources(fullName);
+                    }
+                    // Collect all URLs for logging
+                    final List<URL> configList = new ArrayList<>();
+                    if (resources != null) {
+                        while (resources.hasMoreElements()) {
+                            configList.add(resources.nextElement());
+                        }
+                    }
+                    if (!configList.isEmpty()) {
+                        LOG.info("SPI service [{}] found {} configuration file(s): {}", 
+                            this.service.getName(), configList.size(), configList);
+                        this.configs = java.util.Collections.enumeration(configList);
+                    } else {
+                        LOG.warn("SPI service [{}] no configuration files found for: {}", 
+                            this.service.getName(), fullName);
+                        this.configs = java.util.Collections.emptyEnumeration();
                     }
                 } catch (final IOException x) {
                     throw fail(this.service, "error locating configuration files", x);
