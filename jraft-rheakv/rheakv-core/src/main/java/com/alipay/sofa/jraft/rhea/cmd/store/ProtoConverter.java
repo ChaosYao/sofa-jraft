@@ -16,45 +16,39 @@
  */
 package com.alipay.sofa.jraft.rhea.cmd.store;
 
-import java.io.Serializable;
-
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
 
 /**
- * RPC request header
+ * Utility class for converting between protobuf messages and Java objects.
  *
  * @author jiachun.fjc
  */
-public abstract class BaseRequest implements Serializable {
+public final class ProtoConverter {
 
-    private static final long serialVersionUID = -6576381361684687237L;
-
-    public static final byte  PUT              = 0x01;
-    public static final byte  GET              = 0x02;
-
-    private long              regionId;
-    private RegionEpoch       regionEpoch;
-
-    public long getRegionId() {
-        return regionId;
+    /**
+     * Convert RegionEpoch to RheaKVStoreProto.RegionEpoch
+     */
+    public static RheaKVStoreProto.RegionEpoch toProto(final RegionEpoch epoch) {
+        if (epoch == null) {
+            return null;
+        }
+        return RheaKVStoreProto.RegionEpoch.newBuilder()
+            .setConfVer(epoch.getConfVer())
+            .setVersion(epoch.getVersion())
+            .build();
     }
 
-    public void setRegionId(long regionId) {
-        this.regionId = regionId;
+    /**
+     * Convert RheaKVStoreProto.RegionEpoch to RegionEpoch
+     */
+    public static RegionEpoch fromProto(final RheaKVStoreProto.RegionEpoch proto) {
+        if (proto == null || !proto.isInitialized()) {
+            return null;
+        }
+        return new RegionEpoch(proto.getConfVer(), proto.getVersion());
     }
 
-    public RegionEpoch getRegionEpoch() {
-        return regionEpoch;
-    }
-
-    public void setRegionEpoch(RegionEpoch regionEpoch) {
-        this.regionEpoch = regionEpoch;
-    }
-
-    public abstract byte magic();
-
-    @Override
-    public String toString() {
-        return "BaseRequest{" + "regionId=" + regionId + ", regionEpoch=" + regionEpoch + '}';
+    private ProtoConverter() {
     }
 }
+

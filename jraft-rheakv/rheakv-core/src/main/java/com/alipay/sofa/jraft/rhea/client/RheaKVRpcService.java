@@ -20,7 +20,6 @@ import java.util.concurrent.CompletableFuture;
 
 import com.alipay.sofa.jraft.Lifecycle;
 import com.alipay.sofa.jraft.rhea.client.failover.FailoverClosure;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.options.RpcOptions;
 
@@ -32,15 +31,15 @@ import com.alipay.sofa.jraft.rhea.options.RpcOptions;
 public interface RheaKVRpcService extends Lifecycle<RpcOptions> {
 
     /**
-     * @see #callAsyncWithRpc(BaseRequest, FailoverClosure, Errors, boolean)
+     * @see #callAsyncWithRpc(Object, FailoverClosure, Errors, boolean)
      */
-    <V> CompletableFuture<V> callAsyncWithRpc(final BaseRequest request, final FailoverClosure<V> closure,
+    <V> CompletableFuture<V> callAsyncWithRpc(final Object request, final FailoverClosure<V> closure,
                                               final Errors lastCause);
 
     /**
      * Send KV requests to the remote data service nodes.
      *
-     * @param request       request data
+     * @param request       request data (PutRequest or GetRequest)
      * @param closure       callback for failover strategy
      * @param lastCause     the exception information held by the last call
      *                      failed, the initial value is null
@@ -48,6 +47,6 @@ public interface RheaKVRpcService extends Lifecycle<RpcOptions> {
      * @param <V>           the type of response
      * @return a future with response
      */
-    <V> CompletableFuture<V> callAsyncWithRpc(final BaseRequest request, final FailoverClosure<V> closure,
+    <V> CompletableFuture<V> callAsyncWithRpc(final Object request, final FailoverClosure<V> closure,
                                               final Errors lastCause, final boolean requireLeader);
 }

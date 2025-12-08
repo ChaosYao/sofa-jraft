@@ -16,10 +16,11 @@
  */
 package com.alipay.sofa.jraft.rhea;
 
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetResponse;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutResponse;
+
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
 
 /**
@@ -38,12 +39,12 @@ public interface RegionKVService {
     RegionEpoch getRegionEpoch();
 
     /**
-     * {@link BaseRequest#PUT}
+     * Handle PUT request
      */
-    void handlePutRequest(final PutRequest request, final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
+    void handlePutRequest(final PutRequest request, final RequestProcessClosure<Object, PutResponse> closure);
 
     /**
-     * {@link BaseRequest#GET}
+     * Handle GET request
      */
-    void handleGetRequest(final GetRequest request, final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
+    void handleGetRequest(final GetRequest request, final RequestProcessClosure<Object, GetResponse> closure);
 }

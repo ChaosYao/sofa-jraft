@@ -19,13 +19,13 @@ package com.alipay.sofa.jraft.rhea;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetResponse;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutResponse;
+
 import com.alipay.sofa.jraft.Status;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutResponse;
+import com.alipay.sofa.jraft.rhea.cmd.store.ProtoConverter;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
 import com.alipay.sofa.jraft.rhea.storage.BaseKVStoreClosure;
@@ -62,66 +62,76 @@ public class DefaultRegionKVService implements RegionKVService {
 
     @Override
     public void handlePutRequest(final PutRequest request,
-                                 final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final PutResponse response = new PutResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
+                                 final RequestProcessClosure<Object, PutResponse> closure) {
+        final PutResponse.Builder responseBuilder = PutResponse.newBuilder();
+        responseBuilder.setRegionId(getRegionId());
+        responseBuilder.setRegionEpoch(ProtoConverter.toProto(getRegionEpoch()));
         try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final byte[] key = KVParameterRequires.requireNonNull(request.getKey(), "put.key");
-            final byte[] value = KVParameterRequires.requireNonNull(request.getValue(), "put.value");
+            final RegionEpoch requestEpoch = ProtoConverter.fromProto(request.getRegionEpoch());
+            KVParameterRequires.requireSameEpoch(requestEpoch, getRegionEpoch());
+            final byte[] key = KVParameterRequires.requireNonNull(request.getKey().toByteArray(), "put.key");
+            final byte[] value = KVParameterRequires.requireNonNull(request.getValue().toByteArray(), "put.value");
             this.rawKVStore.put(key, value, new BaseKVStoreClosure() {
 
                 @Override
                 public void run(final Status status) {
                     if (status.isOk()) {
-                        response.setValue((Boolean) getData());
+                        responseBuilder.setValue((Boolean) getData());
                     } else {
-                        setFailure(request, response, status, getError());
+                        setFailure(request, responseBuilder, status, getError());
                     }
-                    closure.sendResponse(response);
+                    closure.sendResponse(responseBuilder.build());
                 }
             });
         } catch (final Throwable t) {
             LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
+            responseBuilder.setErrorCode(Errors.forException(t).code());
+            closure.sendResponse(responseBuilder.build());
         }
     }
 
 
     @Override
     public void handleGetRequest(final GetRequest request,
-                                 final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final GetResponse response = new GetResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
+                                 final RequestProcessClosure<Object, GetResponse> closure) {
+        final GetResponse.Builder responseBuilder = GetResponse.newBuilder();
+        responseBuilder.setRegionId(getRegionId());
+        responseBuilder.setRegionEpoch(ProtoConverter.toProto(getRegionEpoch()));
         try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final byte[] key = KVParameterRequires.requireNonNull(request.getKey(), "get.key");
-            this.rawKVStore.get(key, request.isReadOnlySafe(), new BaseKVStoreClosure() {
+            final RegionEpoch requestEpoch = ProtoConverter.fromProto(request.getRegionEpoch());
+            KVParameterRequires.requireSameEpoch(requestEpoch, getRegionEpoch());
+            final byte[] key = KVParameterRequires.requireNonNull(request.getKey().toByteArray(), "get.key");
+            this.rawKVStore.get(key, request.getReadOnlySafe(), new BaseKVStoreClosure() {
 
                 @Override
                 public void run(final Status status) {
                     if (status.isOk()) {
-                        response.setValue((byte[]) getData());
+                        final byte[] value = (byte[]) getData();
+                        if (value != null) {
+                            responseBuilder.setValue(com.google.protobuf.ByteString.copyFrom(value));
+                        }
                     } else {
-                        setFailure(request, response, status, getError());
+                        setFailure(request, responseBuilder, status, getError());
                     }
-                    closure.sendResponse(response);
+                    closure.sendResponse(responseBuilder.build());
                 }
             });
         } catch (final Throwable t) {
             LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
+            responseBuilder.setErrorCode(Errors.forException(t).code());
+            closure.sendResponse(responseBuilder.build());
         }
     }
 
 
-    private static void setFailure(final BaseRequest request, final BaseResponse<?> response, final Status status,
+    private static void setFailure(final Object request, final Object responseBuilder, final Status status,
                                    final Errors error) {
-        response.setError(error == null ? Errors.STORAGE_ERROR : error);
-        LOG.error("Failed to handle: {}, status: {}, error: {}.", request, status, error);
+        final Errors finalError = error == null ? Errors.STORAGE_ERROR : error;
+        if (responseBuilder instanceof PutResponse.Builder) {
+            ((PutResponse.Builder) responseBuilder).setErrorCode(finalError.code());
+        } else if (responseBuilder instanceof GetResponse.Builder) {
+            ((GetResponse.Builder) responseBuilder).setErrorCode(finalError.code());
+        }
+        LOG.error("Failed to handle: {}, status: {}, error: {}.", request, status, finalError);
     }
 }

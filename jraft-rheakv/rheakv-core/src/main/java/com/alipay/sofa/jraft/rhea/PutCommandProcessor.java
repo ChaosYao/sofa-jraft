@@ -16,62 +16,51 @@
  */
 package com.alipay.sofa.jraft.rhea;
 
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutResponse;
+
 import java.util.concurrent.Executor;
 
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.NoRegionFoundResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
-import com.alipay.sofa.jraft.rhea.errors.RheaRuntimeException;
 import com.alipay.sofa.jraft.rpc.RpcContext;
 import com.alipay.sofa.jraft.rpc.RpcProcessor;
 import com.alipay.sofa.jraft.util.Requires;
 
 /**
- * Rhea KV store RPC request processing service.
+ * Rhea KV store PUT request processing service.
  *
  * @author jiachun.fjc
  */
-public class KVCommandProcessor<T extends BaseRequest> implements RpcProcessor<T> {
+public class PutCommandProcessor implements RpcProcessor<PutRequest> {
 
-    private final Class<T>    reqClazz;
     private final StoreEngine storeEngine;
 
-    public KVCommandProcessor(Class<T> reqClazz, StoreEngine storeEngine) {
-        this.reqClazz = Requires.requireNonNull(reqClazz, "reqClazz");
+    public PutCommandProcessor(StoreEngine storeEngine) {
         this.storeEngine = Requires.requireNonNull(storeEngine, "storeEngine");
     }
 
     @Override
-    public void handleRequest(final RpcContext rpcCtx, final T request) {
+    public void handleRequest(final RpcContext rpcCtx, final PutRequest request) {
         Requires.requireNonNull(request, "request");
-        final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure = new RequestProcessClosure<>(request, rpcCtx);
-        final RegionKVService regionKVService = this.storeEngine.getRegionKVService(request.getRegionId());
+        final long regionId = request.getRegionId();
+        final RegionKVService regionKVService = this.storeEngine.getRegionKVService(regionId);
         if (regionKVService == null) {
+            final RequestProcessClosure<Object, Object> closure = new RequestProcessClosure<>(request, rpcCtx);
             final NoRegionFoundResponse noRegion = new NoRegionFoundResponse();
-            noRegion.setRegionId(request.getRegionId());
+            noRegion.setRegionId(regionId);
             noRegion.setError(Errors.NO_REGION_FOUND);
             noRegion.setValue(false);
             closure.sendResponse(noRegion);
             return;
         }
-        switch (request.magic()) {
-            case BaseRequest.PUT:
-                regionKVService.handlePutRequest((PutRequest) request, closure);
-                break;
-            case BaseRequest.GET:
-                regionKVService.handleGetRequest((GetRequest) request, closure);
-                break;
-            default:
-                throw new RheaRuntimeException("Unsupported request type: " + request.getClass().getName());
-        }
+        final RequestProcessClosure<Object, PutResponse> closure = new RequestProcessClosure<>(request, rpcCtx);
+        regionKVService.handlePutRequest(request, closure);
     }
 
     @Override
     public String interest() {
-        return this.reqClazz.getName();
+        return PutRequest.class.getName();
     }
 
     @Override
@@ -79,3 +68,4 @@ public class KVCommandProcessor<T extends BaseRequest> implements RpcProcessor<T
         return this.storeEngine.getKvRpcExecutor();
     }
 }
+

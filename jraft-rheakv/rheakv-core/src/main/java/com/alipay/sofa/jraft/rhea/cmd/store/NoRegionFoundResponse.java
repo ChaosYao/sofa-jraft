@@ -16,12 +16,60 @@
  */
 package com.alipay.sofa.jraft.rhea.cmd.store;
 
+import com.alipay.sofa.jraft.rhea.errors.Errors;
+import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
+
 /**
  * Region does not exist in the current node.
  *
  * @author jiachun.fjc
  */
-public class NoRegionFoundResponse extends BaseResponse<Boolean> {
+public class NoRegionFoundResponse {
 
-    private static final long serialVersionUID = -3274115927148766255L;
+    private Errors            error            = Errors.NONE;
+    private long              regionId;
+    private RegionEpoch       regionEpoch;
+    private Boolean           value;
+
+    public boolean isSuccess() {
+        return error == Errors.NONE;
+    }
+
+    public Errors getError() {
+        return error;
+    }
+
+    public void setError(Errors error) {
+        this.error = error;
+    }
+
+    public long getRegionId() {
+        return regionId;
+    }
+
+    public void setRegionId(long regionId) {
+        this.regionId = regionId;
+    }
+
+    public RegionEpoch getRegionEpoch() {
+        return regionEpoch;
+    }
+
+    public void setRegionEpoch(RegionEpoch regionEpoch) {
+        this.regionEpoch = regionEpoch;
+    }
+
+    public Boolean getValue() {
+        return value;
+    }
+
+    public void setValue(Boolean value) {
+        this.value = value;
+    }
+
+    @Override
+    public String toString() {
+        return "NoRegionFoundResponse{" + "error=" + error + ", regionId=" + regionId + ", regionEpoch=" + regionEpoch
+               + ", value=" + value + '}';
+    }
 }

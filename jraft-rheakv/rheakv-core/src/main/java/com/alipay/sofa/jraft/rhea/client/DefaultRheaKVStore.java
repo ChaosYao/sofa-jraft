@@ -50,8 +50,11 @@ import com.alipay.sofa.jraft.rhea.client.failover.impl.MapFailoverFuture;
 import com.alipay.sofa.jraft.rhea.client.pd.FakePlacementDriverClient;
 import com.alipay.sofa.jraft.rhea.client.pd.PlacementDriverClient;
 import com.alipay.sofa.jraft.rhea.client.pd.RemotePlacementDriverClient;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetRequest;
+import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutRequest;
+
+import com.alipay.sofa.jraft.rhea.cmd.store.ProtoConverter;
+import com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto;
 import com.alipay.sofa.jraft.rhea.errors.ApiExceptionHelper;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.errors.ErrorsHelper;
@@ -401,11 +404,12 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).get(key, readOnlySafe, closure);
             }
         } else {
-            final GetRequest request = new GetRequest();
-            request.setKey(key);
-            request.setReadOnlySafe(readOnlySafe);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
+            final GetRequest request = GetRequest.newBuilder()
+                .setKey(com.google.protobuf.ByteString.copyFrom(key))
+                .setReadOnlySafe(readOnlySafe)
+                .setRegionId(region.getId())
+                .setRegionEpoch(ProtoConverter.toProto(region.getRegionEpoch()))
+                .build();
             this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause, requireLeader);
         }
     }
@@ -937,11 +941,13 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).put(key, value, closure);
             }
         } else {
-            final PutRequest request = new PutRequest();
-            request.setKey(key);
-            request.setValue(value);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
+            final PutRequest request = 
+                PutRequest.newBuilder()
+                    .setKey(com.google.protobuf.ByteString.copyFrom(key))
+                    .setValue(com.google.protobuf.ByteString.copyFrom(value))
+                    .setRegionId(region.getId())
+                    .setRegionEpoch(com.alipay.sofa.jraft.rhea.cmd.store.ProtoConverter.toProto(region.getRegionEpoch()))
+                    .build();
             LOG.info("** Start to save data by rpcService {}, {}", Arrays.toString(key), Arrays.toString(value));
             this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
         }
