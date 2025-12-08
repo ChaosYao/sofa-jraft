@@ -25,16 +25,10 @@ import org.slf4j.LoggerFactory;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.CASAllRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.CASAllResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.BatchDeleteRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.BatchDeleteResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.BatchPutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.BatchPutResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.CompareAndPutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.CompareAndPutResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.ContainsKeyRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ContainsKeyResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRangeRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRangeResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRequest;
@@ -53,14 +47,10 @@ import com.alipay.sofa.jraft.rhea.cmd.store.MergeRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.MergeResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.MultiGetRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.MultiGetResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.NodeExecuteRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.NodeExecuteResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutIfAbsentRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutIfAbsentResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.RangeSplitRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.RangeSplitResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.ResetSequenceRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.ResetSequenceResponse;
 import com.alipay.sofa.jraft.rhea.cmd.store.ScanRequest;
@@ -68,9 +58,7 @@ import com.alipay.sofa.jraft.rhea.cmd.store.ScanResponse;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
 import com.alipay.sofa.jraft.rhea.storage.BaseKVStoreClosure;
-import com.alipay.sofa.jraft.rhea.storage.CASEntry;
 import com.alipay.sofa.jraft.rhea.storage.KVEntry;
-import com.alipay.sofa.jraft.rhea.storage.NodeExecutor;
 import com.alipay.sofa.jraft.rhea.storage.RawKVStore;
 import com.alipay.sofa.jraft.rhea.storage.Sequence;
 import com.alipay.sofa.jraft.rhea.util.ByteArray;
@@ -309,34 +297,6 @@ public class DefaultRegionKVService implements RegionKVService {
     }
 
     @Override
-    public void handleBatchDeleteRequest(final BatchDeleteRequest request,
-                                         final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final BatchDeleteResponse response = new BatchDeleteResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
-        try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final List<byte[]> keys = KVParameterRequires.requireNonEmpty(request.getKeys(), "delete.keys");
-            this.rawKVStore.delete(keys, new BaseKVStoreClosure() {
-
-                @Override
-                public void run(final Status status) {
-                    if (status.isOk()) {
-                        response.setValue((Boolean) getData());
-                    } else {
-                        setFailure(request, response, status, getError());
-                    }
-                    closure.sendResponse(response);
-                }
-            });
-        } catch (final Throwable t) {
-            LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
-        }
-    }
-
-    @Override
     public void handleMergeRequest(final MergeRequest request,
                                    final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
         final MergeResponse response = new MergeResponse();
@@ -409,34 +369,6 @@ public class DefaultRegionKVService implements RegionKVService {
                 public void run(final Status status) {
                     if (status.isOk()) {
                         response.setValue((Map<ByteArray, byte[]>) getData());
-                    } else {
-                        setFailure(request, response, status, getError());
-                    }
-                    closure.sendResponse(response);
-                }
-            });
-        } catch (final Throwable t) {
-            LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
-        }
-    }
-
-    @Override
-    public void handleContainsKeyRequest(final ContainsKeyRequest request,
-                                         final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final ContainsKeyResponse response = new ContainsKeyResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
-        try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final byte[] key = KVParameterRequires.requireNonNull(request.getKey(), "containsKey.key");
-            this.rawKVStore.containsKey(key, new BaseKVStoreClosure() {
-
-                @Override
-                public void run(final Status status) {
-                    if (status.isOk()) {
-                        response.setValue((Boolean) getData());
                     } else {
                         setFailure(request, response, status, getError());
                     }
@@ -604,94 +536,6 @@ public class DefaultRegionKVService implements RegionKVService {
             response.setError(Errors.forException(t));
             closure.sendResponse(response);
         }
-    }
-
-    @Override
-    public void handleNodeExecuteRequest(final NodeExecuteRequest request,
-                                         final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final NodeExecuteResponse response = new NodeExecuteResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
-        try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final NodeExecutor executor = KVParameterRequires
-                .requireNonNull(request.getNodeExecutor(), "node.executor");
-            this.rawKVStore.execute(executor, true, new BaseKVStoreClosure() {
-
-                @Override
-                public void run(final Status status) {
-                    if (status.isOk()) {
-                        response.setValue((Boolean) getData());
-                    } else {
-                        setFailure(request, response, status, getError());
-                    }
-                    closure.sendResponse(response);
-                }
-            });
-        } catch (final Throwable t) {
-            LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
-        }
-    }
-
-    @Override
-    public void handleRangeSplitRequest(final RangeSplitRequest request,
-                                        final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final RangeSplitResponse response = new RangeSplitResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
-        try {
-            // do not need to check the region epoch
-            final Long newRegionId = KVParameterRequires.requireNonNull(request.getNewRegionId(),
-                "rangeSplit.newRegionId");
-            this.regionEngine.getStoreEngine().applySplit(request.getRegionId(), newRegionId, new BaseKVStoreClosure() {
-
-                @Override
-                public void run(final Status status) {
-                    if (status.isOk()) {
-                        response.setValue((Boolean) getData());
-                    } else {
-                        setFailure(request, response, status, getError());
-                    }
-                    closure.sendResponse(response);
-                }
-            });
-        } catch (final Throwable t) {
-            LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
-        }
-    }
-
-    @Override
-    public void handleCompareAndPutAll(final CASAllRequest request,
-                                       final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure) {
-        final CASAllResponse response = new CASAllResponse();
-        response.setRegionId(getRegionId());
-        response.setRegionEpoch(getRegionEpoch());
-        try {
-            KVParameterRequires.requireSameEpoch(request, getRegionEpoch());
-            final List<CASEntry> casEntries = KVParameterRequires.requireNonEmpty(request.getCasEntries(),
-                "casAll.casEntries");
-            this.rawKVStore.compareAndPutAll(casEntries, new BaseKVStoreClosure() {
-
-                @Override
-                public void run(final Status status) {
-                    if (status.isOk()) {
-                        response.setValue((Boolean) getData());
-                    } else {
-                        setFailure(request, response, status, getError());
-                    }
-                    closure.sendResponse(response);
-                }
-            });
-        } catch (final Throwable t) {
-            LOG.error("Failed to handle: {}, {}.", request, StackTraceUtil.stackTrace(t));
-            response.setError(Errors.forException(t));
-            closure.sendResponse(response);
-        }
-
     }
 
     private static void setFailure(final BaseRequest request, final BaseResponse<?> response, final Status status,

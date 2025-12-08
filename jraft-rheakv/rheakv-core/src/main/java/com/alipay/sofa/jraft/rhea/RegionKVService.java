@@ -18,11 +18,8 @@ package com.alipay.sofa.jraft.rhea;
 
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.CASAllRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.BatchDeleteRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.BatchPutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.CompareAndPutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ContainsKeyRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRangeRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.GetAndPutRequest;
@@ -32,10 +29,8 @@ import com.alipay.sofa.jraft.rhea.cmd.store.KeyLockRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.KeyUnlockRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.MergeRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.MultiGetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.NodeExecuteRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutIfAbsentRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.RangeSplitRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.ResetSequenceRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.ScanRequest;
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
@@ -97,12 +92,6 @@ public interface RegionKVService {
                                   final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
 
     /**
-     * {@link BaseRequest#BATCH_DELETE}
-     */
-    void handleBatchDeleteRequest(final BatchDeleteRequest request,
-                                  final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
-
-    /**
      * {@link BaseRequest#MERGE}
      */
     void handleMergeRequest(final MergeRequest request,
@@ -118,12 +107,6 @@ public interface RegionKVService {
      */
     void handleMultiGetRequest(final MultiGetRequest request,
                                final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
-
-    /**
-     * {@link BaseRequest#CONTAINS_KEY}
-     */
-    void handleContainsKeyRequest(final ContainsKeyRequest request,
-                                  final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
 
     /**
      * {@link BaseRequest#SCAN}
@@ -152,23 +135,5 @@ public interface RegionKVService {
      * {@link BaseRequest#KEY_UNLOCK}
      */
     void handleKeyUnlockRequest(final KeyUnlockRequest request,
-                                final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
-
-    /**
-     * {@link BaseRequest#NODE_EXECUTE}
-     */
-    void handleNodeExecuteRequest(final NodeExecuteRequest request,
-                                  final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
-
-    /**
-     * {@link BaseRequest#RANGE_SPLIT}
-     */
-    void handleRangeSplitRequest(final RangeSplitRequest request,
-                                 final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
-
-    /**
-     * {@link BaseRequest#COMPARE_PUT_ALL}
-     */
-    void handleCompareAndPutAll(final CASAllRequest request,
                                 final RequestProcessClosure<BaseRequest, BaseResponse<?>> closure);
 }
