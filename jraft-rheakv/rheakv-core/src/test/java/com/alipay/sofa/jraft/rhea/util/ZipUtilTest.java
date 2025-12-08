@@ -18,6 +18,8 @@ package com.alipay.sofa.jraft.rhea.util;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.zip.Checksum;
@@ -46,11 +48,11 @@ public class ZipUtilTest {
         }
         FileUtils.forceMkdir(this.sourceDir);
         final File f1 = Paths.get(this.sourceDir.getAbsolutePath(), "f1").toFile();
-        FileUtils.write(f1, "f1");
+        Files.write(f1.toPath(), "f1".getBytes(StandardCharsets.UTF_8));
         final File d1 = Paths.get(this.sourceDir.getAbsolutePath(), "d1").toFile();
         FileUtils.forceMkdir(d1);
         final File f11 = Paths.get(d1.getAbsolutePath(), "f11").toFile();
-        FileUtils.write(f11, "f11");
+        Files.write(f11.toPath(), "f11".getBytes(StandardCharsets.UTF_8));
 
         final File d2 = Paths.get(d1.getAbsolutePath(), "d2").toFile();
         FileUtils.forceMkdir(d2);
@@ -59,7 +61,7 @@ public class ZipUtilTest {
         FileUtils.forceMkdir(d3);
 
         final File f31 = Paths.get(d3.getAbsolutePath(), "f31").toFile();
-        FileUtils.write(f31, "f32");
+        Files.write(f31.toPath(), "f32".getBytes(StandardCharsets.UTF_8));
     }
 
     @After
