@@ -50,21 +50,8 @@ import com.alipay.sofa.jraft.rhea.client.failover.impl.MapFailoverFuture;
 import com.alipay.sofa.jraft.rhea.client.pd.FakePlacementDriverClient;
 import com.alipay.sofa.jraft.rhea.client.pd.PlacementDriverClient;
 import com.alipay.sofa.jraft.rhea.client.pd.RemotePlacementDriverClient;
-import com.alipay.sofa.jraft.rhea.cmd.store.BatchPutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.CompareAndPutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRangeRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetAndPutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetSequenceRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.KeyLockRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.KeyUnlockRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.MergeRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.MultiGetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutIfAbsentRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ResetSequenceRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ScanRequest;
 import com.alipay.sofa.jraft.rhea.errors.ApiExceptionHelper;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.errors.ErrorsHelper;
@@ -484,12 +471,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 }
             }
         } else {
-            final MultiGetRequest request = new MultiGetRequest();
-            request.setKeys(subKeys);
-            request.setReadOnlySafe(readOnlySafe);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause, requireLeader);
+            // MultiGetRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "MultiGet is not supported in benchmark mode"));
         }
     }
 
@@ -617,15 +601,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 }
             }
         } else {
-            final ScanRequest request = new ScanRequest();
-            request.setStartKey(subStartKey);
-            request.setEndKey(subEndKey);
-            request.setReadOnlySafe(readOnlySafe);
-            request.setReturnValue(returnValue);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            request.setReverse(reverse);
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause, requireLeader);
+            // ScanRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "Scan is not supported in benchmark mode"));
         }
     }
 
@@ -758,15 +736,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).scan(startKey, realEndKey, limit, readOnlySafe, returnValue, closure);
             }
         } else {
-            final ScanRequest request = new ScanRequest();
-            request.setStartKey(startKey);
-            request.setEndKey(realEndKey);
-            request.setLimit(limit);
-            request.setReadOnlySafe(readOnlySafe);
-            request.setReturnValue(returnValue);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause, requireLeader);
+            // ScanRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "Scan is not supported in benchmark mode"));
         }
     }
 
@@ -869,12 +841,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).getSequence(seqKey, step, closure);
             }
         } else {
-            final GetSequenceRequest request = new GetSequenceRequest();
-            request.setSeqKey(seqKey);
-            request.setStep(step);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // GetSequenceRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "GetSequence is not supported in benchmark mode"));
         }
     }
 
@@ -914,11 +883,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).resetSequence(seqKey, closure);
             }
         } else {
-            final ResetSequenceRequest request = new ResetSequenceRequest();
-            request.setSeqKey(seqKey);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // ResetSequenceRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "ResetSequence is not supported in benchmark mode"));
         }
     }
 
@@ -1017,12 +984,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).getAndPut(key, value, closure);
             }
         } else {
-            final GetAndPutRequest request = new GetAndPutRequest();
-            request.setKey(key);
-            request.setValue(value);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // GetAndPutRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "GetAndPut is not supported in benchmark mode"));
         }
     }
 
@@ -1065,13 +1029,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).compareAndPut(key, expect, update, closure);
             }
         } else {
-            final CompareAndPutRequest request = new CompareAndPutRequest();
-            request.setKey(key);
-            request.setExpect(expect);
-            request.setUpdate(update);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // CompareAndPutRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "CompareAndPut is not supported in benchmark mode"));
         }
     }
 
@@ -1102,12 +1062,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).merge(key, value, closure);
             }
         } else {
-            final MergeRequest request = new MergeRequest();
-            request.setKey(key);
-            request.setValue(value);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // MergeRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "Merge is not supported in benchmark mode"));
         }
     }
 
@@ -1163,11 +1120,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 }
             }
         } else {
-            final BatchPutRequest request = new BatchPutRequest();
-            request.setKvEntries(subEntries);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // BatchPutRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "BatchPut is not supported in benchmark mode"));
         }
     }
 
@@ -1208,12 +1163,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).putIfAbsent(key, value, closure);
             }
         } else {
-            final PutIfAbsentRequest request = new PutIfAbsentRequest();
-            request.setKey(key);
-            request.setValue(value);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // PutIfAbsentRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "PutIfAbsent is not supported in benchmark mode"));
         }
     }
 
@@ -1252,11 +1204,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).delete(key, closure);
             }
         } else {
-            final DeleteRequest request = new DeleteRequest();
-            request.setKey(key);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // DeleteRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "Delete is not supported in benchmark mode"));
         }
     }
 
@@ -1391,12 +1341,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).deleteRange(subStartKey, subEndKey, closure);
             }
         } else {
-            final DeleteRangeRequest request = new DeleteRangeRequest();
-            request.setStartKey(subStartKey);
-            request.setEndKey(subEndKey);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // DeleteRangeRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "DeleteRange is not supported in benchmark mode"));
         }
     }
 
@@ -1445,13 +1392,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).tryLockWith(key, region.getStartKey(), keepLease, acquirer, closure);
             }
         } else {
-            final KeyLockRequest request = new KeyLockRequest();
-            request.setKey(key);
-            request.setKeepLease(keepLease);
-            request.setAcquirer(acquirer);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // KeyLockRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "KeyLock is not supported in benchmark mode"));
         }
     }
 
@@ -1478,12 +1421,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 getRawKVStore(regionEngine).releaseLockWith(key, acquirer, closure);
             }
         } else {
-            final KeyUnlockRequest request = new KeyUnlockRequest();
-            request.setKey(key);
-            request.setAcquirer(acquirer);
-            request.setRegionId(region.getId());
-            request.setRegionEpoch(region.getRegionEpoch());
-            this.rheaKVRpcService.callAsyncWithRpc(request, closure, lastCause);
+            // KeyUnlockRequest is not supported in benchmark mode
+            closure.setError(Errors.INVALID_REQUEST);
+            closure.run(new Status(-1, "KeyUnlock is not supported in benchmark mode"));
         }
     }
 

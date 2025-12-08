@@ -20,22 +20,9 @@ import java.util.concurrent.Executor;
 
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.BatchPutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.CompareAndPutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRangeRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.DeleteRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetAndPutRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.GetRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.GetSequenceRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.KeyLockRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.KeyUnlockRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.MergeRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.MultiGetRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.NoRegionFoundResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.PutIfAbsentRequest;
 import com.alipay.sofa.jraft.rhea.cmd.store.PutRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ResetSequenceRequest;
-import com.alipay.sofa.jraft.rhea.cmd.store.ScanRequest;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.errors.RheaRuntimeException;
 import com.alipay.sofa.jraft.rpc.RpcContext;
@@ -74,47 +61,8 @@ public class KVCommandProcessor<T extends BaseRequest> implements RpcProcessor<T
             case BaseRequest.PUT:
                 regionKVService.handlePutRequest((PutRequest) request, closure);
                 break;
-            case BaseRequest.BATCH_PUT:
-                regionKVService.handleBatchPutRequest((BatchPutRequest) request, closure);
-                break;
-            case BaseRequest.PUT_IF_ABSENT:
-                regionKVService.handlePutIfAbsentRequest((PutIfAbsentRequest) request, closure);
-                break;
-            case BaseRequest.GET_PUT:
-                regionKVService.handleGetAndPutRequest((GetAndPutRequest) request, closure);
-                break;
-            case BaseRequest.COMPARE_PUT:
-                regionKVService.handleCompareAndPutRequest((CompareAndPutRequest) request, closure);
-                break;
-            case BaseRequest.DELETE:
-                regionKVService.handleDeleteRequest((DeleteRequest) request, closure);
-                break;
-            case BaseRequest.DELETE_RANGE:
-                regionKVService.handleDeleteRangeRequest((DeleteRangeRequest) request, closure);
-                break;
-            case BaseRequest.MERGE:
-                regionKVService.handleMergeRequest((MergeRequest) request, closure);
-                break;
             case BaseRequest.GET:
                 regionKVService.handleGetRequest((GetRequest) request, closure);
-                break;
-            case BaseRequest.MULTI_GET:
-                regionKVService.handleMultiGetRequest((MultiGetRequest) request, closure);
-                break;
-            case BaseRequest.SCAN:
-                regionKVService.handleScanRequest((ScanRequest) request, closure);
-                break;
-            case BaseRequest.GET_SEQUENCE:
-                regionKVService.handleGetSequence((GetSequenceRequest) request, closure);
-                break;
-            case BaseRequest.RESET_SEQUENCE:
-                regionKVService.handleResetSequence((ResetSequenceRequest) request, closure);
-                break;
-            case BaseRequest.KEY_LOCK:
-                regionKVService.handleKeyLockRequest((KeyLockRequest) request, closure);
-                break;
-            case BaseRequest.KEY_UNLOCK:
-                regionKVService.handleKeyUnlockRequest((KeyUnlockRequest) request, closure);
                 break;
             default:
                 throw new RheaRuntimeException("Unsupported request type: " + request.getClass().getName());
