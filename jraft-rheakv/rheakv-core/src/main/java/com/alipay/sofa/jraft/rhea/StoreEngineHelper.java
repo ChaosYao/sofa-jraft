@@ -71,6 +71,8 @@ public final class StoreEngineHelper {
     }
 
     public static void addKvStoreRequestProcessor(final RpcServer rpcServer, final StoreEngine engine) {
+        // Register protobuf messages before registering processors
+        com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProtobufMsgFactory.load();
         rpcServer.registerProcessor(new GetCommandProcessor(engine));
         rpcServer.registerProcessor(new PutCommandProcessor(engine));
     }
