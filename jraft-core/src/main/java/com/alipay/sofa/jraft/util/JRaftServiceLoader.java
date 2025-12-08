@@ -104,7 +104,7 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
                 final int currPriority = currSpi == null ? 0 : currSpi.priority();
                 final int nextPriority = nextSpi == null ? 0 : nextSpi.priority();
 
-                LOG.info("SPI service [{}] comparing priorities: {} (priority={}) vs {} (priority={})", 
+                LOG.info("SPI service [{}] comparing priorities: {} (priority={}) vs {} (priority={})",
                     this.service.getName(), first.getName(), currPriority, cls.getName(), nextPriority);
 
                 if (nextPriority > currPriority) {
@@ -322,12 +322,12 @@ public final class JRaftServiceLoader<S> implements Iterable<S> {
                         }
                     }
                     if (!configList.isEmpty()) {
-                        LOG.info("SPI service [{}] found {} configuration file(s): {}", 
-                            this.service.getName(), configList.size(), configList);
+                        LOG.info("SPI service [{}] found {} configuration file(s): {}", this.service.getName(),
+                            configList.size(), configList);
                         this.configs = java.util.Collections.enumeration(configList);
                     } else {
-                        LOG.warn("SPI service [{}] no configuration files found for: {}", 
-                            this.service.getName(), fullName);
+                        LOG.warn("SPI service [{}] no configuration files found for: {}", this.service.getName(),
+                            fullName);
                         this.configs = java.util.Collections.emptyEnumeration();
                     }
                 } catch (final IOException x) {

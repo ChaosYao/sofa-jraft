@@ -61,8 +61,7 @@ public class DefaultRegionKVService implements RegionKVService {
     }
 
     @Override
-    public void handlePutRequest(final PutRequest request,
-                                 final RequestProcessClosure<Object, PutResponse> closure) {
+    public void handlePutRequest(final PutRequest request, final RequestProcessClosure<Object, PutResponse> closure) {
         final PutResponse.Builder responseBuilder = PutResponse.newBuilder();
         responseBuilder.setRegionId(getRegionId());
         responseBuilder.setRegionEpoch(ProtoConverter.toProto(getRegionEpoch()));
@@ -90,10 +89,8 @@ public class DefaultRegionKVService implements RegionKVService {
         }
     }
 
-
     @Override
-    public void handleGetRequest(final GetRequest request,
-                                 final RequestProcessClosure<Object, GetResponse> closure) {
+    public void handleGetRequest(final GetRequest request, final RequestProcessClosure<Object, GetResponse> closure) {
         final GetResponse.Builder responseBuilder = GetResponse.newBuilder();
         responseBuilder.setRegionId(getRegionId());
         responseBuilder.setRegionEpoch(ProtoConverter.toProto(getRegionEpoch()));
@@ -122,7 +119,6 @@ public class DefaultRegionKVService implements RegionKVService {
             closure.sendResponse(responseBuilder.build());
         }
     }
-
 
     private static void setFailure(final Object request, final Object responseBuilder, final Status status,
                                    final Errors error) {

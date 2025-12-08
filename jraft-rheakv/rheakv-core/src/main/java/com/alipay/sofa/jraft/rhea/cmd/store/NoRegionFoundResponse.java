@@ -26,10 +26,10 @@ import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
  */
 public class NoRegionFoundResponse {
 
-    private Errors            error            = Errors.NONE;
-    private long              regionId;
-    private RegionEpoch       regionEpoch;
-    private Boolean           value;
+    private Errors      error = Errors.NONE;
+    private long        regionId;
+    private RegionEpoch regionEpoch;
+    private Boolean     value;
 
     public boolean isSuccess() {
         return error == Errors.NONE;

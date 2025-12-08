@@ -32,9 +32,7 @@ public final class ProtoConverter {
         if (epoch == null) {
             return null;
         }
-        return RheaKVStoreProto.RegionEpoch.newBuilder()
-            .setConfVer(epoch.getConfVer())
-            .setVersion(epoch.getVersion())
+        return RheaKVStoreProto.RegionEpoch.newBuilder().setConfVer(epoch.getConfVer()).setVersion(epoch.getVersion())
             .build();
     }
 
@@ -51,4 +49,3 @@ public final class ProtoConverter {
     private ProtoConverter() {
     }
 }
-

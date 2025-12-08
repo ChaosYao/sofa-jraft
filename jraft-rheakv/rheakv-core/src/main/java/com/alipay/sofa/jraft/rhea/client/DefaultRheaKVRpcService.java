@@ -148,7 +148,8 @@ public class DefaultRheaKVRpcService implements RheaKVRpcService {
                             closure.run(Status.OK());
                         } else {
                             closure.setError(error);
-                            closure.run(new Status(-1, "RPC failed with address: %s, response: %s", endpoint, response));
+                            closure
+                                .run(new Status(-1, "RPC failed with address: %s, response: %s", endpoint, response));
                         }
                     } else if (result instanceof PutResponse) {
                         final PutResponse response = (PutResponse) result;
@@ -158,10 +159,12 @@ public class DefaultRheaKVRpcService implements RheaKVRpcService {
                             closure.run(Status.OK());
                         } else {
                             closure.setError(error);
-                            closure.run(new Status(-1, "RPC failed with address: %s, response: %s", endpoint, response));
+                            closure
+                                .run(new Status(-1, "RPC failed with address: %s, response: %s", endpoint, response));
                         }
                     } else {
-                        closure.failure(new IllegalArgumentException("Unsupported response type: " + result.getClass().getName()));
+                        closure.failure(new IllegalArgumentException("Unsupported response type: "
+                                                                     + result.getClass().getName()));
                     }
                 } else {
                     closure.failure(err);
