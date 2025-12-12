@@ -50,7 +50,11 @@ public class BenchmarkServer {
                 .start(30, TimeUnit.SECONDS);
         Runtime.getRuntime().addShutdownHook(new Thread(node::stop));
         LOG.info("BenchmarkServer start OK, options: {}", opts);
-        Thread.sleep(Long.MAX_VALUE);
+        try {
+            Thread.sleep(Long.MAX_VALUE);
+        } catch (Exception e) {
+            //
+        }
 
     }
 }
