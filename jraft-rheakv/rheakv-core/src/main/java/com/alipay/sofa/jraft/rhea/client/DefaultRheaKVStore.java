@@ -54,7 +54,7 @@ import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.GetRequest;
 import static com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto.PutRequest;
 
 import com.alipay.sofa.jraft.rhea.cmd.store.ProtoConverter;
-import com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProto;
+import com.alipay.sofa.jraft.rhea.cmd.store.RheaKVStoreProtobufMsgFactory;
 import com.alipay.sofa.jraft.rhea.errors.ApiExceptionHelper;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.errors.ErrorsHelper;
@@ -204,6 +204,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
             LOG.info("[DefaultRheaKVStore] already started.");
             return true;
         }
+
+        // Ensure protobuf messages are registered before creating RPC clients
+        RheaKVStoreProtobufMsgFactory.load();
 
         DescriberManager.getInstance().addDescriber(RouteTable.getInstance());
 
