@@ -35,7 +35,7 @@ public class BenchmarkServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(BenchmarkServer.class);
 
-    public static void main(final String[] args) {
+    public static void main(final String[] args) throws InterruptedException {
         if (args.length < 3) {
             LOG.error("[configPath] are needed.");
         }
@@ -48,10 +48,9 @@ public class BenchmarkServer {
         ConsoleReporter.forRegistry(KVMetrics.metricRegistry()) //
                 .build() //
                 .start(30, TimeUnit.SECONDS);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOG.error("JVM is shutting down", new Exception("SHUTDOWN TRACE"));
-        }));
         Runtime.getRuntime().addShutdownHook(new Thread(node::stop));
         LOG.info("BenchmarkServer start OK, options: {}", opts);
+        Thread.sleep(Long.MAX_VALUE);
+
     }
 }
