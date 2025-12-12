@@ -45,13 +45,13 @@ public class BenchmarkServer {
 
         final Node node = new Node(opts);
         node.start();
-        LOG.warn("IM here started!!!!!");
         ConsoleReporter.forRegistry(KVMetrics.metricRegistry()) //
                 .build() //
                 .start(30, TimeUnit.SECONDS);
-        LOG.warn("IM here , registered!!!");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOG.error("JVM is shutting down", new Exception("SHUTDOWN TRACE"));
+        }));
         Runtime.getRuntime().addShutdownHook(new Thread(node::stop));
-        LOG.warn("IM here, runtime OK!!!");
         LOG.info("BenchmarkServer start OK, options: {}", opts);
     }
 }
