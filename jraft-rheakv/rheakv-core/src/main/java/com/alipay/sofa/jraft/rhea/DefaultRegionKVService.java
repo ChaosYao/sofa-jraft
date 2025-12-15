@@ -75,6 +75,7 @@ public class DefaultRegionKVService implements RegionKVService {
                 @Override
                 public void run(final Status status) {
                     if (status.isOk()) {
+                        responseBuilder.setErrorCode(Errors.NONE.code());
                         responseBuilder.setValue((Boolean) getData());
                     } else {
                         setFailure(request, responseBuilder, status, getError());
@@ -103,6 +104,7 @@ public class DefaultRegionKVService implements RegionKVService {
                 @Override
                 public void run(final Status status) {
                     if (status.isOk()) {
+                        responseBuilder.setErrorCode(Errors.NONE.code());
                         final byte[] value = (byte[]) getData();
                         if (value != null) {
                             responseBuilder.setValue(com.google.protobuf.ByteString.copyFrom(value));
