@@ -115,37 +115,41 @@ public class BenchmarkClient {
         random.nextBytes(valeBytes);
         for (;;) {
             try {
-                slidingWindow.acquire();
-            } catch (final Exception e) {
-                LOG.error("Wrong slidingWindow: {}, {}", slidingWindow.toString(), StackTraceUtil.stackTrace(e));
-            }
-            int i = index++;
-            if (i % sum == 0) {
-                randomRegionIndex = random.nextInt(regionSize);
-            }
-            byte[] keyBytes = regionRouteTableOptionsList.get(randomRegionIndex).getStartKeyBytes();
-            if (keyBytes == null) {
-                keyBytes = BYTES;
-            }
-            final Timer.Context ctx = timer.time();
-            if (Math.abs(i % sum) < writeRatio) {
-                // put
-                final Timer.Context putCtx = putTimer.time();
-                final CompletableFuture<Boolean> f = put(rheaKVStore, keyBytes, valeBytes);
-                f.whenComplete((ignored, throwable) -> {
-                    slidingWindow.release();
-                    ctx.stop();
-                    putCtx.stop();
-                });
-            } else {
-                // get
-                final Timer.Context getCtx = getTimer.time();
-                final CompletableFuture<byte[]> f = get(rheaKVStore, keyBytes);
-                f.whenComplete((ignored, throwable) -> {
-                    slidingWindow.release();
-                    ctx.stop();
-                    getCtx.stop();
-                });
+                try {
+                    slidingWindow.acquire();
+                } catch (final Exception e) {
+                    LOG.error("Wrong slidingWindow: {}, {}", slidingWindow.toString(), StackTraceUtil.stackTrace(e));
+                }
+                int i = index++;
+                if (i % sum == 0) {
+                    randomRegionIndex = random.nextInt(regionSize);
+                }
+                byte[] keyBytes = regionRouteTableOptionsList.get(randomRegionIndex).getStartKeyBytes();
+                if (keyBytes == null) {
+                    keyBytes = BYTES;
+                }
+                final Timer.Context ctx = timer.time();
+                if (Math.abs(i % sum) < writeRatio) {
+                    // put
+                    final Timer.Context putCtx = putTimer.time();
+                    final CompletableFuture<Boolean> f = put(rheaKVStore, keyBytes, valeBytes);
+                    f.whenComplete((ignored, throwable) -> {
+                        slidingWindow.release();
+                        ctx.stop();
+                        putCtx.stop();
+                    });
+                } else {
+                    // get
+                    final Timer.Context getCtx = getTimer.time();
+                    final CompletableFuture<byte[]> f = get(rheaKVStore, keyBytes);
+                    f.whenComplete((ignored, throwable) -> {
+                        slidingWindow.release();
+                        ctx.stop();
+                        getCtx.stop();
+                    });
+                }
+            } catch (final Throwable t) {
+                LOG.error("Error in doRequest: {}", StackTraceUtil.stackTrace(t));
             }
         }
     }
