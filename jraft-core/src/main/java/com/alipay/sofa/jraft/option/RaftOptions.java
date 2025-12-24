@@ -86,6 +86,11 @@ public class RaftOptions implements Copiable<RaftOptions> {
      * @since 1.3.0
      */
     private boolean        stepDownWhenVoteTimedout             = true;
+    /**
+     * Whether to enable replicator notify mode, default is false.
+     * When true, use notify logic instead of direct sendEntries.
+     */
+    private boolean        enableReplicatorNotify               = false;
 
     public boolean isStepDownWhenVoteTimedout() {
         return this.stepDownWhenVoteTimedout;
@@ -93,6 +98,14 @@ public class RaftOptions implements Copiable<RaftOptions> {
 
     public void setStepDownWhenVoteTimedout(final boolean stepDownWhenVoteTimeout) {
         this.stepDownWhenVoteTimedout = stepDownWhenVoteTimeout;
+    }
+
+    public boolean isEnableReplicatorNotify() {
+        return this.enableReplicatorNotify;
+    }
+
+    public void setEnableReplicatorNotify(final boolean enableReplicatorNotify) {
+        this.enableReplicatorNotify = enableReplicatorNotify;
     }
 
     public int getDisruptorPublishEventWaitTimeoutSecs() {
@@ -251,6 +264,8 @@ public class RaftOptions implements Copiable<RaftOptions> {
         raftOptions.setDisruptorPublishEventWaitTimeoutSecs(this.disruptorPublishEventWaitTimeoutSecs);
         raftOptions.setEnableLogEntryChecksum(this.enableLogEntryChecksum);
         raftOptions.setReadOnlyOptions(this.readOnlyOptions);
+        raftOptions.setStepDownWhenVoteTimedout(this.stepDownWhenVoteTimedout);
+        raftOptions.setEnableReplicatorNotify(this.enableReplicatorNotify);
         return raftOptions;
     }
 
@@ -265,6 +280,7 @@ public class RaftOptions implements Copiable<RaftOptions> {
                + ", maxReplicatorInflightMsgs=" + this.maxReplicatorInflightMsgs + ", disruptorBufferSize="
                + this.disruptorBufferSize + ", disruptorPublishEventWaitTimeoutSecs="
                + this.disruptorPublishEventWaitTimeoutSecs + ", enableLogEntryChecksum=" + this.enableLogEntryChecksum
-               + ", readOnlyOptions=" + this.readOnlyOptions + '}';
+               + ", readOnlyOptions=" + this.readOnlyOptions + ", stepDownWhenVoteTimedout="
+               + this.stepDownWhenVoteTimedout + ", enableReplicatorNotify=" + this.enableReplicatorNotify + '}';
     }
 }

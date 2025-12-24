@@ -35,6 +35,7 @@ import com.alipay.sofa.jraft.rpc.RpcRequestClosure;
 import com.alipay.sofa.jraft.rpc.RpcRequests;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequestHeader;
+import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
 import com.alipay.sofa.jraft.rpc.impl.ConnectionClosedEventListener;
 import com.alipay.sofa.jraft.util.RpcFactoryHelper;
 import com.alipay.sofa.jraft.util.Utils;
@@ -442,11 +443,33 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         return request.getEntriesCount() == 0 && !request.hasData();
     }
 
+    private boolean isNotifyRequest(final AppendEntriesRequest request) {
+        // No entries and has empty data means a notify request.
+        return request.getEntriesCount() == 0 && request.hasData() 
+            && request.getData().isEmpty();
+    }
+
     @Override
     public Message processRequest0(final RaftServerService service, final AppendEntriesRequest request,
                                    final RpcRequestClosure done) {
 
         final Node node = (Node) service;
+        // Check if this is a notify request and enableReplicatorNotify is enabled
+        if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
+            // Immediately return success response for notify
+            // Use the term from request (leader's term)
+            final AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
+                .setTerm(request.getTerm())
+                .setSuccess(true)
+                .build();
+            // Send response immediately
+            done.getRpcCtx().sendResponse(response);
+            
+            // Execute pullLogEntry directly since response is already sent
+            pullLogEntry(node, request);
+            
+            return null;
+        }
 
         if (node.getRaftOptions().isReplicatorPipeline()) {
             final String groupId = request.getGroupId();
@@ -470,6 +493,15 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         } else {
             return service.handleAppendEntriesRequest(request, done);
         }
+    }
+
+    /**
+     * Pull log entries asynchronously after receiving notify request.
+     * @param node the node instance
+     * @param request the notify request
+     */
+    private void pullLogEntry(final Node node, final AppendEntriesRequest request) {
+        // TODO: implement pull log entry logic
     }
 
     @Override

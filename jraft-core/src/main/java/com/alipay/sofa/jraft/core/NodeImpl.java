@@ -1951,6 +1951,7 @@ public class NodeImpl implements Node, RaftServerService {
                     .build();
             }
 
+            //TODO 加一个constant index 变量，用于存储一致的index，
             if (entriesCount == 0) {
                 // heartbeat or probe request
                 final AppendEntriesResponse.Builder respBuilder = AppendEntriesResponse.newBuilder() //

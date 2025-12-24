@@ -814,6 +814,7 @@ public class Replicator implements ThreadId.OnError {
         }
     }
 
+    //TODO 组织log entry leader的 processor 可以直接复用
     boolean prepareEntry(final long nextSendingIndex, final int offset, final RaftOutter.EntryMeta.Builder emb,
                          final RecyclableByteBufferList dateBuffer) {
         if (dateBuffer.getCapacity() >= this.raftOptions.getMaxBodySize()) {
@@ -1233,6 +1234,8 @@ public class Replicator implements ThreadId.OnError {
         }
     }
 
+
+    //TODO 要改 continue send
     @SuppressWarnings("ContinueOrBreakFromFinallyBlock")
     static void onRpcReturned(final ThreadId id, final RequestType reqType, final Status status, final Message request,
                               final Message response, final int seq, final int stateVersion, final long rpcSendTime) {
@@ -1266,6 +1269,7 @@ public class Replicator implements ThreadId.OnError {
         }
 
         boolean continueSendEntries = false;
+        RequestType lastProcessedRequestType = null;
 
         final boolean isLogDebugEnabled = LOG.isDebugEnabled();
         StringBuilder sb = null;
@@ -1319,6 +1323,7 @@ public class Replicator implements ThreadId.OnError {
                     return;
                 }
                 try {
+                    lastProcessedRequestType = queuedPipelinedResponse.requestType;
                     switch (queuedPipelinedResponse.requestType) {
                         case AppendEntries:
                             continueSendEntries = onAppendEntriesReturned(id, inflight, queuedPipelinedResponse.status,
@@ -1348,8 +1353,14 @@ public class Replicator implements ThreadId.OnError {
                 LOG.debug(sb.toString());
             }
             if (continueSendEntries) {
-                // unlock in sendEntries.
-                r.sendEntries();
+                if (r.raftOptions.isEnableReplicatorNotify() 
+                    && lastProcessedRequestType == RequestType.AppendEntries) {
+                    // unlock in notifyNextIndex.
+                    r.notifyNextIndex(r.nextIndex);
+                } else {
+                    // unlock in sendEntries.
+                    r.sendEntries();
+                }
             }
         }
     }
@@ -1546,6 +1557,46 @@ public class Replicator implements ThreadId.OnError {
             this.waitId = this.options.getLogManager().wait(nextWaitIndex - 1,
                 (arg, errorCode) -> continueSending((ThreadId) arg, errorCode), this.id);
             this.statInfo.runningState = RunningState.IDLE;
+        } finally {
+            this.id.unlock();
+        }
+    }
+
+    /**
+     * Notify next index when enableReplicatorNotify is true.
+     * @param nextIndex next index to notify
+     */
+    void notifyNextIndex(final long nextIndex) {
+        final AppendEntriesRequest.Builder rb = AppendEntriesRequest.newBuilder();
+        fillCommonFields(rb, nextIndex - 1, false);
+        
+        try {
+            // No entries and has empty data means a notify request.
+            rb.setData(ByteString.EMPTY);
+            final AppendEntriesRequest request = rb.build();
+            
+            // Send RPC with callback for logging
+            this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
+                new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+
+                    @Override
+                    public void run(final Status status) {
+                        if (status.isOk()) {
+                            LOG.debug("Node {} received NotifyResponse from {} term {} nextIndex {} success",
+                                Replicator.this.options.getNode().getNodeId(),
+                                Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex);
+                        } else {
+                            LOG.warn("Node {} received NotifyResponse from {} term {} nextIndex {} failed: {}",
+                                Replicator.this.options.getNode().getNodeId(),
+                                Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex,
+                                status);
+                        }
+                    }
+                });
+            
+            LOG.debug("Node {} send NotifyRequest to {} term {} nextIndex {}", 
+                this.options.getNode().getNodeId(), this.options.getPeerId(), 
+                this.options.getTerm(), nextIndex);
         } finally {
             this.id.unlock();
         }
