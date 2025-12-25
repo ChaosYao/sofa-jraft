@@ -73,6 +73,8 @@ public final class EnumOutter {
         }
 
         /**
+         * @param value The numeric wire value of the corresponding enum entry.
+         * @return The enum associated with the given numeric wire value.
          * @deprecated Use {@link #forNumber(int)} instead.
          */
         @java.lang.Deprecated
@@ -80,6 +82,10 @@ public final class EnumOutter {
             return forNumber(value);
         }
 
+        /**
+         * @param value The numeric wire value of the corresponding enum entry.
+         * @return The enum associated with the given numeric wire value.
+         */
         public static EntryType forNumber(int value) {
             switch (value) {
                 case 0:
@@ -195,6 +201,8 @@ public final class EnumOutter {
         }
 
         /**
+         * @param value The numeric wire value of the corresponding enum entry.
+         * @return The enum associated with the given numeric wire value.
          * @deprecated Use {@link #forNumber(int)} instead.
          */
         @java.lang.Deprecated
@@ -202,6 +210,10 @@ public final class EnumOutter {
             return forNumber(value);
         }
 
+        /**
+         * @param value The numeric wire value of the corresponding enum entry.
+         * @return The enum associated with the given numeric wire value.
+         */
         public static ErrorType forNumber(int value) {
             switch (value) {
                 case 0:
@@ -276,14 +288,8 @@ public final class EnumOutter {
                                               + "TABLE\020\002\022\027\n\023ERROR_TYPE_SNAPSHOT\020\003\022\034\n\030ERRO"
                                               + "R_TYPE_STATE_MACHINE\020\004\022\023\n\017ERROR_TYPE_MET"
                                               + "A\020\005B*\n\034com.alipay.sofa.jraft.entityB\nEnu" + "mOutter" };
-        com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner = new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {
-            public com.google.protobuf.ExtensionRegistry assignDescriptors(com.google.protobuf.Descriptors.FileDescriptor root) {
-                descriptor = root;
-                return null;
-            }
-        };
-        com.google.protobuf.Descriptors.FileDescriptor.internalBuildGeneratedFileFrom(descriptorData,
-            new com.google.protobuf.Descriptors.FileDescriptor[] {}, assigner);
+        descriptor = com.google.protobuf.Descriptors.FileDescriptor.internalBuildGeneratedFileFrom(descriptorData,
+            new com.google.protobuf.Descriptors.FileDescriptor[] {});
     }
 
     // @@protoc_insertion_point(outer_class_scope)

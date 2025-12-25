@@ -1545,6 +1545,8 @@ public class Replicator implements ThreadId.OnError {
         rb.setPrevLogIndex(prevLogIndex);
         rb.setPrevLogTerm(prevLogTerm);
         rb.setCommittedIndex(this.options.getBallotBox().getLastCommittedIndex());
+        // Set hintIndex to leader's latest log entry index
+        rb.setHintIndex(this.options.getLogManager().getLastLogIndex());
         return true;
     }
 

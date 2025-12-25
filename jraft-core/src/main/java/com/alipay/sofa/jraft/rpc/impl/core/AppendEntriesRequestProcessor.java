@@ -445,8 +445,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
 
     private boolean isNotifyRequest(final AppendEntriesRequest request) {
         // No entries and has empty data means a notify request.
-        return request.getEntriesCount() == 0 && request.hasData() 
-            && request.getData().isEmpty();
+        return request.getEntriesCount() == 0 && request.hasData() && request.getData().isEmpty();
     }
 
     @Override
@@ -458,16 +457,14 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
             // Immediately return success response for notify
             // Use the term from request (leader's term)
-            final AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
-                .setTerm(request.getTerm())
-                .setSuccess(true)
-                .build();
+            final AppendEntriesResponse response = AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
+                .setSuccess(true).build();
             // Send response immediately
             done.getRpcCtx().sendResponse(response);
-            
+
             // Execute pullLogEntry directly since response is already sent
             pullLogEntry(node, request);
-            
+
             return null;
         }
 

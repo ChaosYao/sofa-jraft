@@ -75,6 +75,7 @@ message AppendEntriesRequest {
   repeated EntryMeta entries = 7;
   required int64 committed_index = 8;
   optional bytes data = 9;
+  optional int64 hint_index = 10;
 };
 
 message AppendEntriesResponse {
