@@ -34,6 +34,8 @@ import com.alipay.sofa.jraft.rpc.RpcClient;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.GetFileRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.GetFileResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotResponse;
@@ -114,6 +116,18 @@ public class DefaultRaftClientService extends AbstractClientService implements R
     @Override
     public Future<Message> appendEntries(final Endpoint endpoint, final AppendEntriesRequest request,
                                          final int timeoutMs, final RpcResponseClosure<AppendEntriesResponse> done) {
+        final Executor executor = this.appendEntriesExecutorMap.computeIfAbsent(endpoint, k -> APPEND_ENTRIES_EXECUTORS.next());
+
+        if (!checkConnection(endpoint, true)) {
+            return onConnectionFail(endpoint, request, done, executor);
+        }
+
+        return invokeWithDone(endpoint, request, done, timeoutMs, executor);
+    }
+
+    @Override
+    public Future<Message> pullLogEntry(final Endpoint endpoint, final PullLogEntryRequest request,
+                                        final int timeoutMs, final RpcResponseClosure<PullLogEntryResponse> done) {
         final Executor executor = this.appendEntriesExecutorMap.computeIfAbsent(endpoint, k -> APPEND_ENTRIES_EXECUTORS.next());
 
         if (!checkConnection(endpoint, true)) {

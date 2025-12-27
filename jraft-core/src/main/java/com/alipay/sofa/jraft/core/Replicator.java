@@ -1906,4 +1906,26 @@ public class Replicator implements ThreadId.OnError {
         return nextIdx;
     }
 
+    public static boolean updateNextIndex(final ThreadId id, final long newNextIndex) {
+        final Replicator r = (Replicator) id.lock();
+        if (r == null) {
+            return false;
+        }
+        try {
+            if (newNextIndex > r.nextIndex) {
+                r.nextIndex = newNextIndex;
+                r.hasSucceeded = true;
+                r.setState(State.Replicate);
+                if (r.blockTimer != null) {
+                    r.blockTimer.cancel(false);
+                    r.blockTimer = null;
+                }
+                return true;
+            }
+            return false;
+        } finally {
+            id.unlock();
+        }
+    }
+
 }

@@ -83,6 +83,8 @@ import com.alipay.sofa.jraft.rpc.RaftServerService;
 import com.alipay.sofa.jraft.rpc.RpcRequestClosure;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.ReadIndexRequest;
@@ -2011,6 +2013,154 @@ public class NodeImpl implements Node, RaftServerService {
             }
             this.metrics.recordLatency("handle-append-entries", Utils.monotonicMs() - startMs);
             this.metrics.recordSize("handle-append-entries-count", entriesCount);
+        }
+    }
+
+    @Override
+    public Message handlePullLogEntryRequest(final PullLogEntryRequest request, final RpcRequestClosure done) {
+        this.writeLock.lock();
+        try {
+            if (!this.state.isActive()) {
+                LOG.warn("Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
+                return RpcFactoryHelper //
+                    .responseFactory() //
+                    .newResponse(PullLogEntryResponse.getDefaultInstance(), RaftError.EINVAL,
+                        "Node %s is not in active state, state %s.", getNodeId(), this.state.name());
+            }
+
+            final PeerId serverId = new PeerId();
+            if (!serverId.parse(request.getServerId())) {
+                LOG.warn("Node {} received PullLogEntryRequest from {} serverId bad format.", getNodeId(),
+                    request.getServerId());
+                return RpcFactoryHelper //
+                    .responseFactory() //
+                    .newResponse(PullLogEntryResponse.getDefaultInstance(), RaftError.EINVAL,
+                        "Parse serverId failed: %s.", request.getServerId());
+            }
+
+            if (request.getTerm() < this.currTerm) {
+                LOG.warn("Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.", getNodeId(),
+                    request.getServerId(), request.getTerm(), this.currTerm);
+                return PullLogEntryResponse.newBuilder() //
+                    .setTerm(this.currTerm) //
+                    .setSuccess(false) //
+                    .build();
+            }
+
+            checkStepDown(request.getTerm(), serverId);
+
+            final long prevLogIndex = request.getPrevLogIndex();
+            final long prevLogTerm = request.getPrevLogTerm();
+            final long localPrevLogTerm = this.logManager.getTerm(prevLogIndex);
+            if (localPrevLogTerm != prevLogTerm) {
+                final long lastLogIndex = this.logManager.getLastLogIndex();
+                LOG.warn(
+                    "Node {} reject term_unmatched PullLogEntryRequest from {}, term={}, prevLogIndex={}, prevLogTerm={}, localPrevLogTerm={}, lastLogIndex={}.",
+                    getNodeId(), request.getServerId(), request.getTerm(), prevLogIndex, prevLogTerm, localPrevLogTerm,
+                    lastLogIndex);
+                return PullLogEntryResponse.newBuilder() //
+                    .setTerm(this.currTerm) //
+                    .setSuccess(false) //
+                    .setLastLogIndex(lastLogIndex) //
+                    .build();
+            }
+
+            final long nextIndex = prevLogIndex + 1;
+            final long lastLogIndex = this.logManager.getLastLogIndex();
+            if (nextIndex > lastLogIndex) {
+                return PullLogEntryResponse.newBuilder() //
+                    .setTerm(this.currTerm) //
+                    .setSuccess(true) //
+                    .setLastLogIndex(lastLogIndex) //
+                    .setCommittedIndex(this.ballotBox.getLastCommittedIndex()) //
+                    .build();
+            }
+
+            final List<RaftOutter.EntryMeta> entriesList = new ArrayList<>();
+            final List<ByteBuffer> dataBuffers = new ArrayList<>();
+            long currentIndex = nextIndex;
+            final long maxIndex = Math.min(lastLogIndex, nextIndex + 100);
+            int totalDataSize = 0;
+            final int maxBodySize = this.raftOptions.getMaxBodySize();
+
+            while (currentIndex <= maxIndex && totalDataSize < maxBodySize) {
+                final LogEntry entry = this.logManager.getEntry(currentIndex);
+                if (entry == null) {
+                    break;
+                }
+
+                final RaftOutter.EntryMeta.Builder emb = RaftOutter.EntryMeta.newBuilder();
+                emb.setTerm(entry.getId().getTerm());
+                emb.setType(entry.getType());
+                if (entry.hasChecksum()) {
+                    emb.setChecksum(entry.getChecksum());
+                }
+
+                if (entry.getPeers() != null) {
+                    for (final PeerId peer : entry.getPeers()) {
+                        emb.addPeers(peer.toString());
+                    }
+                }
+                if (entry.getOldPeers() != null) {
+                    for (final PeerId peer : entry.getOldPeers()) {
+                        emb.addOldPeers(peer.toString());
+                    }
+                }
+                if (entry.getLearners() != null) {
+                    for (final PeerId peer : entry.getLearners()) {
+                        emb.addLearners(peer.toString());
+                    }
+                }
+                if (entry.getOldLearners() != null) {
+                    for (final PeerId peer : entry.getOldLearners()) {
+                        emb.addOldLearners(peer.toString());
+                    }
+                }
+
+                final int dataLen = entry.getData() != null ? entry.getData().remaining() : 0;
+                emb.setDataLen(dataLen);
+                if (entry.getData() != null) {
+                    dataBuffers.add(entry.getData().slice());
+                    totalDataSize += dataLen;
+                }
+
+                entriesList.add(emb.build());
+                currentIndex++;
+            }
+
+            final PullLogEntryResponse.Builder responseBuilder = PullLogEntryResponse.newBuilder() //
+                .setTerm(this.currTerm) //
+                .setSuccess(true) //
+                .setLastLogIndex(lastLogIndex) //
+                .setCommittedIndex(this.ballotBox.getLastCommittedIndex()) //
+                .addAllEntries(entriesList);
+
+            if (!dataBuffers.isEmpty()) {
+                int totalSize = 0;
+                for (final ByteBuffer buf : dataBuffers) {
+                    totalSize += buf.remaining();
+                }
+                final ByteBuffer combinedData = ByteBuffer.allocate(totalSize);
+                for (final ByteBuffer buf : dataBuffers) {
+                    combinedData.put(buf);
+                }
+                combinedData.flip();
+                responseBuilder.setData(com.google.protobuf.ByteString.copyFrom(combinedData));
+            }
+
+            final PullLogEntryResponse response = responseBuilder.build();
+
+            if (entriesList.size() > 0 && this.state == State.STATE_LEADER) {
+                final ThreadId replicatorId = this.replicatorGroup.getReplicator(serverId);
+                if (replicatorId != null) {
+                    final long newNextIndex = prevLogIndex + 1 + entriesList.size();
+                    Replicator.updateNextIndex(replicatorId, newNextIndex);
+                }
+            }
+
+            return response;
+        } finally {
+            this.writeLock.unlock();
         }
     }
 

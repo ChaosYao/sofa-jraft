@@ -16,17 +16,28 @@
  */
 package com.alipay.sofa.jraft.rpc.impl.core;
 
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.NodeManager;
+import com.alipay.sofa.jraft.Status;
+import com.alipay.sofa.jraft.core.NodeImpl;
+import com.alipay.sofa.jraft.entity.EnumOutter;
+import com.alipay.sofa.jraft.entity.LogEntry;
+import com.alipay.sofa.jraft.entity.LogId;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.entity.RaftOutter;
 import com.alipay.sofa.jraft.rpc.Connection;
 import com.alipay.sofa.jraft.rpc.RaftServerService;
 import com.alipay.sofa.jraft.rpc.RpcContext;
@@ -36,7 +47,13 @@ import com.alipay.sofa.jraft.rpc.RpcRequests;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequestHeader;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryResponse;
+import com.alipay.sofa.jraft.rpc.RpcResponseClosure;
+import com.alipay.sofa.jraft.rpc.RpcResponseClosureAdapter;
 import com.alipay.sofa.jraft.rpc.impl.ConnectionClosedEventListener;
+import com.alipay.sofa.jraft.storage.LogManager;
+import com.alipay.sofa.jraft.util.Endpoint;
 import com.alipay.sofa.jraft.util.RpcFactoryHelper;
 import com.alipay.sofa.jraft.util.Utils;
 import com.alipay.sofa.jraft.util.concurrent.ConcurrentHashSet;
@@ -418,6 +435,16 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
      */
     private final ExecutorSelector                                                                executorSelector;
 
+    /**
+     * Thread-safe boolean flag indicating if pulling log entries is in progress.
+     */
+    private final AtomicBoolean                                                                   pulling              = new AtomicBoolean(false);
+
+    /**
+     * Volatile variable to store leader's latest log entry index from hintIndex.
+     */
+    private volatile long                                                                          hintedLastIndex      = 0;
+
     public AppendEntriesRequestProcessor(final Executor executor) {
         super(executor, RpcRequests.AppendEntriesResponse.getDefaultInstance());
         this.executorSelector = new PeerExecutorSelector();
@@ -455,15 +482,36 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         final Node node = (Node) service;
         // Check if this is a notify request and enableReplicatorNotify is enabled
         if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
-            // Immediately return success response for notify
-            // Use the term from request (leader's term)
+
             final AppendEntriesResponse response = AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                 .setSuccess(true).build();
-            // Send response immediately
             done.getRpcCtx().sendResponse(response);
 
-            // Execute pullLogEntry directly since response is already sent
-            pullLogEntry(node, request);
+            long leaderLastIndex = request.getHintIndex();
+            if (leaderLastIndex > hintedLastIndex) {
+                hintedLastIndex = leaderLastIndex;
+            }
+
+            if (pulling.compareAndSet(false, true)) {
+                try {
+                    long currentIndex = request.getPrevLogIndex();
+                    while (currentIndex < hintedLastIndex) {
+                        final Long nextLogIndex = pullLogEntry(node, request);
+                        if (nextLogIndex != null && nextLogIndex > currentIndex) {
+                            currentIndex = nextLogIndex;
+                        } else {
+                            break;
+                        }
+                    }
+                } catch (final Exception e) {
+                    LOG.error("Failed to pull log entries for notify request, groupId={}, peerId={}, " +
+                        "currentIndex={}, hintedLastIndex={}", request.getGroupId(), request.getPeerId(),
+                        request.getPrevLogIndex(), hintedLastIndex, e);
+                } finally {
+                    pulling.set(false);
+                }
+            }
+
 
             return null;
         }
@@ -496,9 +544,225 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
      * Pull log entries asynchronously after receiving notify request.
      * @param node the node instance
      * @param request the notify request
+     * @return the next log index after pulling, or null if failed
      */
-    private void pullLogEntry(final Node node, final AppendEntriesRequest request) {
-        // TODO: implement pull log entry logic
+    private Long pullLogEntry(final Node node, final AppendEntriesRequest request) {
+        if (!(node instanceof NodeImpl)) {
+            LOG.error("Node is not NodeImpl instance, cannot pull log entries");
+            return null;
+        }
+
+        final NodeImpl nodeImpl = (NodeImpl) node;
+        final PeerId leaderId = new PeerId();
+        if (!leaderId.parse(request.getServerId())) {
+            LOG.error("Failed to parse leader serverId: {}", request.getServerId());
+            return null;
+        }
+
+        final Endpoint leaderEndpoint = leaderId.getEndpoint();
+        final long prevLogIndex = request.getPrevLogIndex();
+        final long prevLogTerm = request.getPrevLogTerm();
+
+        final PullLogEntryRequest pullRequest = PullLogEntryRequest.newBuilder()
+            .setGroupId(request.getGroupId())
+            .setServerId(nodeImpl.getServerId().toString())
+            .setPeerId(leaderId.toString())
+            .setTerm(request.getTerm())
+            .setPrevLogIndex(prevLogIndex)
+            .setPrevLogTerm(prevLogTerm)
+            .build();
+
+        final long[] nextLogIndex = new long[1];
+        final boolean[] success = new boolean[1];
+        final Object lock = new Object();
+
+        final RpcResponseClosure<PullLogEntryResponse> closure = new RpcResponseClosureAdapter<PullLogEntryResponse>() {
+            @Override
+            public void run(final Status status) {
+                synchronized (lock) {
+                    if (!status.isOk()) {
+                        LOG.warn("Failed to pull log entries from leader {}: {}", leaderId, status);
+                        success[0] = false;
+                        lock.notify();
+                        return;
+                    }
+
+                    final PullLogEntryResponse response = getResponse();
+                    if (response == null || !response.getSuccess()) {
+                        LOG.warn("Pull log entries failed from leader {}, success={}", leaderId,
+                            response != null ? response.getSuccess() : false);
+                        success[0] = false;
+                        lock.notify();
+                        return;
+                    }
+
+                    try {
+                        final List<LogEntry> entries = convertResponseToLogEntries(response, prevLogIndex + 1);
+                        if (entries.isEmpty()) {
+                            nextLogIndex[0] = prevLogIndex + 1;
+                            success[0] = true;
+                            lock.notify();
+                            return;
+                        }
+
+                        final LogManager.StableClosure stableClosure = new LogManager.StableClosure(entries) {
+                            @Override
+                            public void run(final Status stableStatus) {
+                                synchronized (lock) {
+                                    if (stableStatus.isOk()) {
+                                        nextLogIndex[0] = prevLogIndex + entries.size();
+                                        success[0] = true;
+                                    } else {
+                                        LOG.error("Failed to append log entries: {}", stableStatus);
+                                        success[0] = false;
+                                    }
+                                    lock.notify();
+                                }
+                            }
+                        };
+
+                        final LogManager logManager = getLogManager(nodeImpl);
+                        if (logManager == null) {
+                            LOG.error("Failed to get logManager from NodeImpl");
+                            success[0] = false;
+                            lock.notify();
+                            return;
+                        }
+                        logManager.appendEntries(entries, stableClosure);
+                    } catch (final Exception e) {
+                        LOG.error("Failed to process pull log entries response", e);
+                        success[0] = false;
+                        lock.notify();
+                    }
+                }
+            }
+        };
+
+        nodeImpl.getRpcService().pullLogEntry(leaderEndpoint, pullRequest, nodeImpl.getOptions().getElectionTimeoutMs(),
+            closure);
+
+        synchronized (lock) {
+            try {
+                lock.wait(nodeImpl.getOptions().getElectionTimeoutMs());
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.warn("Interrupted while waiting for pull log entries response");
+                return null;
+            }
+        }
+
+        if (success[0]) {
+            return nextLogIndex[0];
+        }
+        return null;
+    }
+
+    private List<LogEntry> convertResponseToLogEntries(final PullLogEntryResponse response, final long startIndex) {
+        final List<LogEntry> entries = new ArrayList<>();
+        final List<RaftOutter.EntryMeta> entriesList = response.getEntriesList();
+        if (entriesList.isEmpty()) {
+            return entries;
+        }
+
+        ByteBuffer allData = null;
+        if (response.hasData() && !response.getData().isEmpty()) {
+            allData = ByteBuffer.wrap(response.getData().toByteArray());
+        }
+
+        long currentIndex = startIndex;
+        for (final RaftOutter.EntryMeta entry : entriesList) {
+            final LogEntry logEntry = logEntryFromMeta(currentIndex, allData, entry);
+            if (logEntry != null) {
+                entries.add(logEntry);
+            }
+            currentIndex++;
+        }
+
+        return entries;
+    }
+
+    private LogEntry logEntryFromMeta(final long index, final ByteBuffer allData, final RaftOutter.EntryMeta entry) {
+        if (entry.getType() != EnumOutter.EntryType.ENTRY_TYPE_UNKNOWN) {
+            final LogEntry logEntry = new LogEntry();
+            logEntry.setId(new LogId(index, entry.getTerm()));
+            logEntry.setType(entry.getType());
+            if (entry.hasChecksum()) {
+                logEntry.setChecksum(entry.getChecksum());
+            }
+            final long dataLen = entry.getDataLen();
+            if (dataLen > 0 && allData != null) {
+                final byte[] bs = new byte[(int) dataLen];
+                allData.get(bs, 0, bs.length);
+                logEntry.setData(ByteBuffer.wrap(bs));
+            }
+
+            if (entry.getPeersCount() > 0) {
+                if (entry.getType() != EnumOutter.EntryType.ENTRY_TYPE_CONFIGURATION) {
+                    throw new IllegalStateException(
+                        "Invalid log entry that contains peers but is not ENTRY_TYPE_CONFIGURATION type: "
+                                + entry.getType());
+                }
+                fillLogEntryPeers(entry, logEntry);
+            } else if (entry.getType() == EnumOutter.EntryType.ENTRY_TYPE_CONFIGURATION) {
+                throw new IllegalStateException(
+                    "Invalid log entry that contains zero peers but is ENTRY_TYPE_CONFIGURATION type");
+            }
+            return logEntry;
+        }
+        return null;
+    }
+
+    private void fillLogEntryPeers(final RaftOutter.EntryMeta entry, final LogEntry logEntry) {
+        if (entry.getPeersCount() > 0) {
+            final List<PeerId> peers = new ArrayList<>(entry.getPeersCount());
+            for (final String peerStr : entry.getPeersList()) {
+                final PeerId peer = new PeerId();
+                peer.parse(peerStr);
+                peers.add(peer);
+            }
+            logEntry.setPeers(peers);
+        }
+
+        if (entry.getOldPeersCount() > 0) {
+            final List<PeerId> oldPeers = new ArrayList<>(entry.getOldPeersCount());
+            for (final String peerStr : entry.getOldPeersList()) {
+                final PeerId peer = new PeerId();
+                peer.parse(peerStr);
+                oldPeers.add(peer);
+            }
+            logEntry.setOldPeers(oldPeers);
+        }
+
+        if (entry.getLearnersCount() > 0) {
+            final List<PeerId> learners = new ArrayList<>(entry.getLearnersCount());
+            for (final String peerStr : entry.getLearnersList()) {
+                final PeerId peer = new PeerId();
+                peer.parse(peerStr);
+                learners.add(peer);
+            }
+            logEntry.setLearners(learners);
+        }
+
+        if (entry.getOldLearnersCount() > 0) {
+            final List<PeerId> oldLearners = new ArrayList<>(entry.getOldLearnersCount());
+            for (final String peerStr : entry.getOldLearnersList()) {
+                final PeerId peer = new PeerId();
+                peer.parse(peerStr);
+                oldLearners.add(peer);
+            }
+            logEntry.setOldLearners(oldLearners);
+        }
+    }
+
+    private LogManager getLogManager(final NodeImpl nodeImpl) {
+        try {
+            final Field logManagerField = NodeImpl.class.getDeclaredField("logManager");
+            logManagerField.setAccessible(true);
+            return (LogManager) logManagerField.get(nodeImpl);
+        } catch (final Exception e) {
+            LOG.error("Failed to get logManager from NodeImpl", e);
+            return null;
+        }
     }
 
     @Override
