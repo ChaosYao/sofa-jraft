@@ -465,14 +465,13 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
     }
 
     private boolean isHeartbeatRequest(final AppendEntriesRequest request) {
-        // No entries and no data means a true heartbeat request.
-        // TODO(boyan) refactor, adds a new flag field?
+        // hintIndex == -1 means a heartbeat request
         return request.getEntriesCount() == 0 && !request.hasData();
     }
 
     private boolean isNotifyRequest(final AppendEntriesRequest request) {
-        // No entries and has empty data means a notify request.
-        return request.getEntriesCount() == 0 && request.hasData() && request.getData().isEmpty();
+        // hintIndex > 0, no entries, and has empty data means a notify request
+        return request.getEntriesCount() == 0 && request.hasHintIndex() && request.getHintIndex() > 0;
     }
 
     @Override

@@ -782,8 +782,8 @@ public class Replicator implements ThreadId.OnError {
                 this.heartbeatInFly = this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request,
                     this.options.getElectionTimeoutMs() / 2, heartbeatDone);
             } else {
-                // No entries and has empty data means a probe request.
-                // TODO(boyan) refactor, adds a new flag field?
+                // Probe request: set hintIndex to -2
+                rb.setHintIndex(-2);
                 rb.setData(ByteString.EMPTY);
                 final AppendEntriesRequest request = rb.build();
                 // Sending a probe request.
@@ -1545,8 +1545,13 @@ public class Replicator implements ThreadId.OnError {
         rb.setPrevLogIndex(prevLogIndex);
         rb.setPrevLogTerm(prevLogTerm);
         rb.setCommittedIndex(this.options.getBallotBox().getLastCommittedIndex());
-        // Set hintIndex to leader's latest log entry index
-        rb.setHintIndex(this.options.getLogManager().getLastLogIndex());
+        // Set hintIndex based on request type:
+        // -1 for heartbeat, -2 for probe, latest log index for notify/append entries
+        if (isHeartbeat) {
+            rb.setHintIndex(-1);
+        } else {
+            rb.setHintIndex(this.options.getLogManager().getLastLogIndex());
+        }
         return true;
     }
 
@@ -1573,7 +1578,8 @@ public class Replicator implements ThreadId.OnError {
         fillCommonFields(rb, nextIndex - 1, false);
         
         try {
-            // No entries and has empty data means a notify request.
+            // Notify request: hintIndex is already set to latest log index in fillCommonFields
+            // No entries and has empty data
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
             
