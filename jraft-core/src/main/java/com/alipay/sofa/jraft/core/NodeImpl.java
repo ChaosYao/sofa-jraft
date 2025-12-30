@@ -2018,6 +2018,7 @@ public class NodeImpl implements Node, RaftServerService {
 
     @Override
     public Message handlePullLogEntryRequest(final PullLogEntryRequest request, final RpcRequestClosure done) {
+        //TODO 有必要吗
         this.writeLock.lock();
         try {
             if (!this.state.isActive()) {
@@ -2047,7 +2048,8 @@ public class NodeImpl implements Node, RaftServerService {
                     .build();
             }
 
-            checkStepDown(request.getTerm(), serverId);
+            //TODO 要不要step down
+            //checkStepDown(request.getTerm(), serverId);
 
             final long prevLogIndex = request.getPrevLogIndex();
             final long prevLogTerm = request.getPrevLogTerm();
@@ -2616,6 +2618,14 @@ public class NodeImpl implements Node, RaftServerService {
 
     public RaftClientService getRpcService() {
         return this.rpcService;
+    }
+
+    public LogManager getLogManager() {
+        return this.logManager;
+    }
+
+    public BallotBox getBallotBox() {
+        return this.ballotBox;
     }
 
     public void onError(final RaftException error) {

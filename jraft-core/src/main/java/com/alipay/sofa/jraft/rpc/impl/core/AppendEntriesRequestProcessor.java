@@ -16,7 +16,6 @@
  */
 package com.alipay.sofa.jraft.rpc.impl.core;
 
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -589,7 +588,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                     final PullLogEntryResponse response = getResponse();
                     if (response == null || !response.getSuccess()) {
                         LOG.warn("Pull log entries failed from leader {}, success={}", leaderId,
-                            response != null ? response.getSuccess() : false);
+                                response != null && response.getSuccess());
                         success[0] = false;
                         lock.notify();
                         return;
@@ -599,17 +598,27 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                         final List<LogEntry> entries = convertResponseToLogEntries(response, prevLogIndex + 1);
                         if (entries.isEmpty()) {
                             nextLogIndex[0] = prevLogIndex + 1;
+                            if (response.hasCommittedIndex()) {
+                                final long committedIndex = response.getCommittedIndex();
+                                nodeImpl.getBallotBox().setLastCommittedIndex(Math.min(committedIndex, prevLogIndex));
+                            }
                             success[0] = true;
                             lock.notify();
                             return;
                         }
+
+                        final long committedIndex = response.hasCommittedIndex() ? response.getCommittedIndex() : 0;
+                        final long lastAppendedIndex = prevLogIndex + entries.size();
 
                         final LogManager.StableClosure stableClosure = new LogManager.StableClosure(entries) {
                             @Override
                             public void run(final Status stableStatus) {
                                 synchronized (lock) {
                                     if (stableStatus.isOk()) {
-                                        nextLogIndex[0] = prevLogIndex + entries.size();
+                                        nextLogIndex[0] = lastAppendedIndex;
+                                        if (committedIndex > 0) {
+                                            nodeImpl.getBallotBox().setLastCommittedIndex(Math.min(committedIndex, lastAppendedIndex));
+                                        }
                                         success[0] = true;
                                     } else {
                                         LOG.error("Failed to append log entries: {}", stableStatus);
@@ -620,14 +629,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                             }
                         };
 
-                        final LogManager logManager = getLogManager(nodeImpl);
-                        if (logManager == null) {
-                            LOG.error("Failed to get logManager from NodeImpl");
-                            success[0] = false;
-                            lock.notify();
-                            return;
-                        }
-                        logManager.appendEntries(entries, stableClosure);
+                        nodeImpl.getLogManager().appendEntries(entries, stableClosure);
                     } catch (final Exception e) {
                         LOG.error("Failed to process pull log entries response", e);
                         success[0] = false;
@@ -642,7 +644,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
 
         synchronized (lock) {
             try {
-                lock.wait(nodeImpl.getOptions().getElectionTimeoutMs());
+                lock.wait(nodeImpl.getOptions().getElectionTimeoutMs() * 2);
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 LOG.warn("Interrupted while waiting for pull log entries response");
@@ -753,16 +755,6 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         }
     }
 
-    private LogManager getLogManager(final NodeImpl nodeImpl) {
-        try {
-            final Field logManagerField = NodeImpl.class.getDeclaredField("logManager");
-            logManagerField.setAccessible(true);
-            return (LogManager) logManagerField.get(nodeImpl);
-        } catch (final Exception e) {
-            LOG.error("Failed to get logManager from NodeImpl", e);
-            return null;
-        }
-    }
 
     @Override
     public String interest() {
