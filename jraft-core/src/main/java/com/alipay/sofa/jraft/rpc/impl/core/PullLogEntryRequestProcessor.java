@@ -58,4 +58,3 @@ public class PullLogEntryRequestProcessor extends NodeRequestProcessor<PullLogEn
         return PullLogEntryRequest.class.getName();
     }
 }
-

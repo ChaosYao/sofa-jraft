@@ -73,7 +73,7 @@ public interface RaftClientService extends ClientService {
      * @return a future with result
      */
     Future<Message> pullLogEntry(final Endpoint endpoint, final RpcRequests.PullLogEntryRequest request,
-                                  final int timeoutMs, final RpcResponseClosure<RpcRequests.PullLogEntryResponse> done);
+                                 final int timeoutMs, final RpcResponseClosure<RpcRequests.PullLogEntryResponse> done);
 
     /**
      * Sends a install-snapshot request and handle the response with done.

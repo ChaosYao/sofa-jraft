@@ -437,12 +437,13 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
     /**
      * Thread-safe boolean flag indicating if pulling log entries is in progress.
      */
-    private final AtomicBoolean                                                                   pulling              = new AtomicBoolean(false);
+    private final AtomicBoolean                                                                   pulling             = new AtomicBoolean(
+                                                                                                                          false);
 
     /**
      * Volatile variable to store leader's latest log entry index from hintIndex.
      */
-    private volatile long                                                                          hintedLastIndex      = 0;
+    private volatile long                                                                         hintedLastIndex     = 0;
 
     public AppendEntriesRequestProcessor(final Executor executor) {
         super(executor, RpcRequests.AppendEntriesResponse.getDefaultInstance());
@@ -502,14 +503,13 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                         }
                     }
                 } catch (final Exception e) {
-                    LOG.error("Failed to pull log entries for notify request, groupId={}, peerId={}, " +
-                        "currentIndex={}, hintedLastIndex={}", request.getGroupId(), request.getPeerId(),
+                    LOG.error("Failed to pull log entries for notify request, groupId={}, peerId={}, "
+                              + "currentIndex={}, hintedLastIndex={}", request.getGroupId(), request.getPeerId(),
                         request.getPrevLogIndex(), hintedLastIndex, e);
                 } finally {
                     pulling.set(false);
                 }
             }
-
 
             return null;
         }
@@ -561,14 +561,9 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         final long prevLogIndex = request.getPrevLogIndex();
         final long prevLogTerm = request.getPrevLogTerm();
 
-        final PullLogEntryRequest pullRequest = PullLogEntryRequest.newBuilder()
-            .setGroupId(request.getGroupId())
-            .setServerId(nodeImpl.getServerId().toString())
-            .setPeerId(leaderId.toString())
-            .setTerm(request.getTerm())
-            .setPrevLogIndex(prevLogIndex)
-            .setPrevLogTerm(prevLogTerm)
-            .build();
+        final PullLogEntryRequest pullRequest = PullLogEntryRequest.newBuilder().setGroupId(request.getGroupId())
+            .setServerId(nodeImpl.getServerId().toString()).setPeerId(leaderId.toString()).setTerm(request.getTerm())
+            .setPrevLogIndex(prevLogIndex).setPrevLogTerm(prevLogTerm).build();
 
         final long[] nextLogIndex = new long[1];
         final boolean[] success = new boolean[1];
@@ -588,7 +583,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                     final PullLogEntryResponse response = getResponse();
                     if (response == null || !response.getSuccess()) {
                         LOG.warn("Pull log entries failed from leader {}, success={}", leaderId,
-                                response != null && response.getSuccess());
+                            response != null && response.getSuccess());
                         success[0] = false;
                         lock.notify();
                         return;
@@ -617,7 +612,8 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                                     if (stableStatus.isOk()) {
                                         nextLogIndex[0] = lastAppendedIndex;
                                         if (committedIndex > 0) {
-                                            nodeImpl.getBallotBox().setLastCommittedIndex(Math.min(committedIndex, lastAppendedIndex));
+                                            nodeImpl.getBallotBox().setLastCommittedIndex(
+                                                Math.min(committedIndex, lastAppendedIndex));
                                         }
                                         success[0] = true;
                                     } else {
@@ -639,8 +635,8 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             }
         };
 
-        nodeImpl.getRpcService().pullLogEntry(leaderEndpoint, pullRequest, nodeImpl.getOptions().getElectionTimeoutMs(),
-            closure);
+        nodeImpl.getRpcService().pullLogEntry(leaderEndpoint, pullRequest,
+            nodeImpl.getOptions().getElectionTimeoutMs(), closure);
 
         synchronized (lock) {
             try {
@@ -754,7 +750,6 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             logEntry.setOldLearners(oldLearners);
         }
     }
-
 
     @Override
     public String interest() {
