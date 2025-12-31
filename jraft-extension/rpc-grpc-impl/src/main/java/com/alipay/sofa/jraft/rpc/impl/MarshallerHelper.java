@@ -44,6 +44,7 @@ public class MarshallerHelper {
         messages
             .put(RpcRequests.TimeoutNowRequest.class.getName(), RpcRequests.TimeoutNowResponse.getDefaultInstance());
         messages.put(RpcRequests.ReadIndexRequest.class.getName(), RpcRequests.ReadIndexResponse.getDefaultInstance());
+        messages.put(RpcRequests.PullLogEntryRequest.class.getName(), RpcRequests.PullLogEntryResponse.getDefaultInstance());
         messages.put(CliRequests.AddPeerRequest.class.getName(), CliRequests.AddPeerResponse.getDefaultInstance());
         messages
             .put(CliRequests.RemovePeerRequest.class.getName(), CliRequests.RemovePeerResponse.getDefaultInstance());
