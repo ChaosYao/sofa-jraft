@@ -2366,7 +2366,6 @@ public final class LocalStorageOutter {
                 name_ = "";
             }
 
-            @java.lang.Override
             @SuppressWarnings({ "unused" })
             protected java.lang.Object newInstance(java.lang.Object unused) {
                 return new File();
@@ -4073,11 +4072,17 @@ public final class LocalStorageOutter {
                                               + "e\022\014\n\004name\030\001 \002(\t\022\"\n\004meta\030\002 \001(\0132\024.jraft.Lo"
                                               + "calFileMetaB2\n\034com.alipay.sofa.jraft.ent"
                                               + "ityB\022LocalStorageOutter" };
-        descriptor = com.google.protobuf.Descriptors.FileDescriptor.internalBuildGeneratedFileFrom(
+        com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner = new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {
+            public com.google.protobuf.ExtensionRegistry assignDescriptors(com.google.protobuf.Descriptors.FileDescriptor root) {
+                descriptor = root;
+                return null;
+            }
+        };
+        com.google.protobuf.Descriptors.FileDescriptor.internalBuildGeneratedFileFrom(
             descriptorData,
             new com.google.protobuf.Descriptors.FileDescriptor[] {
             com.alipay.sofa.jraft.entity.RaftOutter.getDescriptor(),
-            com.alipay.sofa.jraft.entity.LocalFileMetaOutter.getDescriptor(), });
+            com.alipay.sofa.jraft.entity.LocalFileMetaOutter.getDescriptor(), }, assigner);
         internal_static_jraft_ConfigurationPBMeta_descriptor = getDescriptor().getMessageTypes().get(0);
         internal_static_jraft_ConfigurationPBMeta_fieldAccessorTable = new com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
             internal_static_jraft_ConfigurationPBMeta_descriptor, new java.lang.String[] { "Peers", "OldPeers", });
