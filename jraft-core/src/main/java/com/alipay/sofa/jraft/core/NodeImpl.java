@@ -2019,10 +2019,14 @@ public class NodeImpl implements Node, RaftServerService {
     @Override
     public Message handlePullLogEntryRequest(final PullLogEntryRequest request, final RpcRequestClosure done) {
         //TODO 有必要吗
+        LOG.info("[PULL-ENTRY] Node {} handling PullLogEntryRequest groupId={} from {} term={} prevLogIndex={} prevLogTerm={}",
+            getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), 
+            request.getPrevLogIndex(), request.getPrevLogTerm());
+        
         this.writeLock.lock();
         try {
             if (!this.state.isActive()) {
-                LOG.warn("Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
+                LOG.warn("[PULL-ENTRY] Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
                 return RpcFactoryHelper //
                     .responseFactory() //
                     .newResponse(PullLogEntryResponse.getDefaultInstance(), RaftError.EINVAL,
@@ -2031,7 +2035,7 @@ public class NodeImpl implements Node, RaftServerService {
 
             final PeerId serverId = new PeerId();
             if (!serverId.parse(request.getServerId())) {
-                LOG.warn("Node {} received PullLogEntryRequest from {} serverId bad format.", getNodeId(),
+                LOG.warn("[PULL-ENTRY] Node {} received PullLogEntryRequest from {} serverId bad format.", getNodeId(),
                     request.getServerId());
                 return RpcFactoryHelper //
                     .responseFactory() //
@@ -2040,7 +2044,7 @@ public class NodeImpl implements Node, RaftServerService {
             }
 
             if (request.getTerm() < this.currTerm) {
-                LOG.warn("Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.", getNodeId(),
+                LOG.warn("[PULL-ENTRY] Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.", getNodeId(),
                     request.getServerId(), request.getTerm(), this.currTerm);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
@@ -2057,7 +2061,7 @@ public class NodeImpl implements Node, RaftServerService {
             if (localPrevLogTerm != prevLogTerm) {
                 final long lastLogIndex = this.logManager.getLastLogIndex();
                 LOG.warn(
-                    "Node {} reject term_unmatched PullLogEntryRequest from {}, term={}, prevLogIndex={}, prevLogTerm={}, localPrevLogTerm={}, lastLogIndex={}.",
+                    "[PULL-ENTRY] Node {} reject term_unmatched PullLogEntryRequest from {}, term={}, prevLogIndex={}, prevLogTerm={}, localPrevLogTerm={}, lastLogIndex={}.",
                     getNodeId(), request.getServerId(), request.getTerm(), prevLogIndex, prevLogTerm, localPrevLogTerm,
                     lastLogIndex);
                 return PullLogEntryResponse.newBuilder() //
@@ -2070,6 +2074,8 @@ public class NodeImpl implements Node, RaftServerService {
             final long nextIndex = prevLogIndex + 1;
             final long lastLogIndex = this.logManager.getLastLogIndex();
             if (nextIndex > lastLogIndex) {
+                LOG.info("[PULL-ENTRY] Node {} no more entries to send, groupId={} nextIndex={} lastLogIndex={}",
+                    getNodeId(), request.getGroupId(), nextIndex, lastLogIndex);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
                     .setSuccess(true) //
@@ -2130,6 +2136,9 @@ public class NodeImpl implements Node, RaftServerService {
                 currentIndex++;
             }
 
+            LOG.info("[PULL-ENTRY] Node {} preparing response with entries, groupId={} entriesCount={} fromIndex={} toIndex={}",
+                getNodeId(), request.getGroupId(), entriesList.size(), nextIndex, currentIndex - 1);
+            
             final PullLogEntryResponse.Builder responseBuilder = PullLogEntryResponse.newBuilder() //
                 .setTerm(this.currTerm) //
                 .setSuccess(true) //

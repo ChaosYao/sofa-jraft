@@ -1584,27 +1584,27 @@ public class Replicator implements ThreadId.OnError {
             final AppendEntriesRequest request = rb.build();
             
             // Send RPC with callback for logging
+            LOG.info("[NOTIFY] Node {} sending NotifyRequest to {} term {} nextIndex {} hintIndex {}", 
+                this.options.getNode().getNodeId(), this.options.getPeerId(), 
+                this.options.getTerm(), nextIndex, request.getHintIndex());
+            
             this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
                 new RpcResponseClosureAdapter<AppendEntriesResponse>() {
 
                     @Override
                     public void run(final Status status) {
                         if (status.isOk()) {
-                            LOG.debug("Node {} received NotifyResponse from {} term {} nextIndex {} success",
+                            LOG.info("[NOTIFY] Node {} received NotifyResponse from {} term {} nextIndex {} success",
                                 Replicator.this.options.getNode().getNodeId(),
                                 Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex);
                         } else {
-                            LOG.warn("Node {} received NotifyResponse from {} term {} nextIndex {} failed: {}",
+                            LOG.warn("[NOTIFY] Node {} received NotifyResponse from {} term {} nextIndex {} failed: {}",
                                 Replicator.this.options.getNode().getNodeId(),
                                 Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex,
                                 status);
                         }
                     }
                 });
-            
-            LOG.debug("Node {} send NotifyRequest to {} term {} nextIndex {}", 
-                this.options.getNode().getNodeId(), this.options.getPeerId(), 
-                this.options.getTerm(), nextIndex);
         } finally {
             this.id.unlock();
         }
