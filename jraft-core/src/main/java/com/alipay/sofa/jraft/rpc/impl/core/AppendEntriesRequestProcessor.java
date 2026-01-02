@@ -651,6 +651,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
 
                         final long committedIndex = response.hasCommittedIndex() ? response.getCommittedIndex() : 0;
                         final long lastAppendedIndex = prevLogIndex + entries.size();
+                        final int entriesCount = entries.size(); // 保存 entries 数量，避免闭包中访问时已被清空
 
                         final LogManager.StableClosure stableClosure = new LogManager.StableClosure(entries) {
                             @Override
@@ -664,7 +665,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                                         }
                                         success[0] = true;
                                         LOG.info("[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} committedIndex={}",
-                                            nodeImpl.getNodeId(), request.getGroupId(), entries.size(), lastAppendedIndex, committedIndex);
+                                            nodeImpl.getNodeId(), request.getGroupId(), entriesCount, lastAppendedIndex, committedIndex);
                                     } else {
                                         LOG.error("[NOTIFY-PULL] Node {} failed to append log entries: {}", 
                                             nodeImpl.getNodeId(), stableStatus);
