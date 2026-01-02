@@ -2023,7 +2023,7 @@ public class NodeImpl implements Node, RaftServerService {
             getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), 
             request.getPrevLogIndex(), request.getPrevLogTerm());
         
-        this.writeLock.lock();
+
         try {
             if (!this.state.isActive()) {
                 LOG.warn("[PULL-ENTRY] Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
@@ -2170,8 +2170,10 @@ public class NodeImpl implements Node, RaftServerService {
             }
 
             return response;
-        } finally {
-            this.writeLock.unlock();
+        } catch (Exception e) {
+            LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}",
+                getNodeId(), request.getGroupId(), e);
+            return null;
         }
     }
 

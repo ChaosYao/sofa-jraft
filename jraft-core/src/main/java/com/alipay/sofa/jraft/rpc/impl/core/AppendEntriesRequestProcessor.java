@@ -609,12 +609,35 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                         return;
                     }
                     
-                    LOG.info("[NOTIFY-PULL] Node {} received PullLogEntryResponse from leader {} groupId={} success=true entriesCount={}",
-                        nodeImpl.getNodeId(), leaderId, request.getGroupId(),
-                        response != null && response.getEntriesCount() > 0 ? response.getEntriesCount() : 0);
+                    // 只打印 response 中的 data 数据
+                    if (response.hasData() && !response.getData().isEmpty()) {
+                        final byte[] responseData = response.getData().toByteArray();
+                        LOG.info("[NOTIFY-PULL] PullLogEntryResponse.data: size={}, hex={}, utf8={}", 
+                            responseData.length, 
+                            bytesToHex(responseData),
+                            new String(responseData));
+                    } else {
+                        LOG.info("[NOTIFY-PULL] PullLogEntryResponse has no data");
+                    }
 
                     try {
                         final List<LogEntry> entries = convertResponseToLogEntries(response, prevLogIndex + 1);
+                        
+                        // 只打印 LogEntry 中的具体数据内容
+                        LOG.info("[NOTIFY-PULL] Converted LogEntry data: count={}", entries.size());
+                        for (int i = 0; i < entries.size(); i++) {
+                            final LogEntry entry = entries.get(i);
+                            if (entry.getData() != null && entry.getData().remaining() > 0) {
+                                final byte[] dataBytes = new byte[entry.getData().remaining()];
+                                entry.getData().duplicate().get(dataBytes);
+                                LOG.info("[NOTIFY-PULL] LogEntry[{}] data: index={}, term={}, size={}, hex={}, utf8={}", 
+                                    i, entry.getId().getIndex(), entry.getId().getTerm(), 
+                                    dataBytes.length, bytesToHex(dataBytes), new String(dataBytes));
+                            } else {
+                                LOG.info("[NOTIFY-PULL] LogEntry[{}] has no data: index={}, term={}", 
+                                    i, entry.getId().getIndex(), entry.getId().getTerm());
+                            }
+                        }
                         if (entries.isEmpty()) {
                             nextLogIndex[0] = prevLogIndex + 1;
                             if (response.hasCommittedIndex()) {
@@ -684,6 +707,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
     private List<LogEntry> convertResponseToLogEntries(final PullLogEntryResponse response, final long startIndex) {
         final List<LogEntry> entries = new ArrayList<>();
         final List<RaftOutter.EntryMeta> entriesList = response.getEntriesList();
+        
         if (entriesList.isEmpty()) {
             return entries;
         }
@@ -701,7 +725,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             }
             currentIndex++;
         }
-
+        
         return entries;
     }
 
@@ -713,8 +737,14 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             if (entry.hasChecksum()) {
                 logEntry.setChecksum(entry.getChecksum());
             }
+            
             final long dataLen = entry.getDataLen();
             if (dataLen > 0 && allData != null) {
+                if (allData.remaining() < dataLen) {
+                    LOG.error("[NOTIFY-PULL] logEntryFromMeta: insufficient data in ByteBuffer, need={}, remaining={}",
+                        dataLen, allData.remaining());
+                    return null;
+                }
                 final byte[] bs = new byte[(int) dataLen];
                 allData.get(bs, 0, bs.length);
                 logEntry.setData(ByteBuffer.wrap(bs));
@@ -731,6 +761,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                 throw new IllegalStateException(
                     "Invalid log entry that contains zero peers but is ENTRY_TYPE_CONFIGURATION type");
             }
+            
             return logEntry;
         }
         return null;
@@ -819,5 +850,16 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         } else {
             LOG.info("Connection disconnected: {}", remoteAddress);
         }
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        final StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 }
