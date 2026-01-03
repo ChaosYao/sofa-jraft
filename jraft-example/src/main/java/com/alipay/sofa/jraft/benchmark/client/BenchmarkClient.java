@@ -89,20 +89,72 @@ public class BenchmarkClient {
             .build() //
             .start(30, TimeUnit.SECONDS);
 
-        LOG.info("Start benchmark...");
-        startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, regionRouteTableOptionsList);
+        LOG.info("Start benchmark with 2-minute intervals...");
+        // Run benchmark in a loop, repeating every 2 minutes
+        while (true) {
+            LOG.info("Starting new benchmark cycle...");
+            startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, regionRouteTableOptionsList);
+            
+            // Run benchmark for 2 minutes
+            try {
+                Thread.sleep(2 * 60 * 1000); // 2 minutes
+            } catch (final InterruptedException e) {
+                LOG.warn("Benchmark interrupted, exiting...");
+                Thread.currentThread().interrupt();
+                break;
+            }
+            
+            // Stop current benchmark threads
+            LOG.info("Stopping current benchmark cycle...");
+            stopBenchmark();
+            
+            // Wait for 2 minutes before next cycle
+            LOG.info("Waiting 2 minutes before next cycle...");
+            try {
+                Thread.sleep(2 * 60 * 1000); // 2 minutes
+            } catch (final InterruptedException e) {
+                LOG.warn("Benchmark interrupted, exiting...");
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        
+        // Cleanup
+        rheaKVStore.shutdown();
     }
+
+    private static volatile boolean shouldStop = false;
+    private static Thread[] benchmarkThreads = null;
 
     public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int writeRatio, final int readRatio,
                                       final int valueSize, final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
+        shouldStop = false;
+        benchmarkThreads = new Thread[threads];
         for (int i = 0; i < threads; i++) {
             final Thread t = new Thread(() -> doRequest(rheaKVStore, writeRatio, readRatio, valueSize, regionRouteTableOptionsList));
-            t.setDaemon(true);
+            t.setDaemon(false); // Changed to non-daemon so they don't exit when main thread sleeps
+            benchmarkThreads[i] = t;
             t.start();
         }
     }
 
-    @SuppressWarnings("InfiniteLoopStatement")
+    public static void stopBenchmark() {
+        shouldStop = true;
+        if (benchmarkThreads != null) {
+            // Wait for threads to finish current operations
+            for (final Thread t : benchmarkThreads) {
+                if (t != null && t.isAlive()) {
+                    try {
+                        t.join(1000); // Wait up to 1 second for thread to finish
+                    } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+            benchmarkThreads = null;
+        }
+    }
+
     public static void doRequest(final RheaKVStore rheaKVStore, final int writeRatio, final int readRatio, final int valueSize,
                                  final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
         final int regionSize = regionRouteTableOptionsList.size();
@@ -113,7 +165,7 @@ public class BenchmarkClient {
         int randomRegionIndex = 0;
         final byte[] valeBytes = new byte[valueSize];
         random.nextBytes(valeBytes);
-        for (;;) {
+        while (!shouldStop) {
             try {
                 try {
                     slidingWindow.acquire();
