@@ -88,13 +88,9 @@ public class BenchmarkClient {
             rheaKVStore.bPut("benchmark", BytesUtil.writeUtf8("benchmark start at: " + new Date()));
             try {
                 LOG.info(BytesUtil.readUtf8(rheaKVStore.bGet("benchmark")));
-            } catch (final TimeoutException e) {
-                LOG.warn("Failed to get benchmark start marker due to timeout: {}", e.getMessage());
             } catch (final Exception e) {
-                LOG.warn("Failed to get benchmark start marker: {}", e.getMessage());
+                LOG.warn("Failed to get benchmark start marker, but continuing anyway: {}", e.getMessage());
             }
-        } catch (final TimeoutException e) {
-            LOG.warn("Failed to put benchmark start marker due to timeout, but continuing anyway: {}", e.getMessage());
         } catch (final Exception e) {
             LOG.warn("Failed to put benchmark start marker, but continuing anyway: {}", e.getMessage());
         }
