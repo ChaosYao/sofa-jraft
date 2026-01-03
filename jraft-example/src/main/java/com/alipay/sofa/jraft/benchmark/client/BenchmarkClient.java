@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,8 +83,21 @@ public class BenchmarkClient {
 
         rebalance(rheaKVStore, opts.getInitialServerList(), regionRouteTableOptionsList);
 
-        rheaKVStore.bPut("benchmark", BytesUtil.writeUtf8("benchmark start at: " + new Date()));
-        LOG.info(BytesUtil.readUtf8(rheaKVStore.bGet("benchmark")));
+        // Try to put benchmark start marker, but don't fail if it times out
+        try {
+            rheaKVStore.bPut("benchmark", BytesUtil.writeUtf8("benchmark start at: " + new Date()));
+            try {
+                LOG.info(BytesUtil.readUtf8(rheaKVStore.bGet("benchmark")));
+            } catch (final TimeoutException e) {
+                LOG.warn("Failed to get benchmark start marker due to timeout: {}", e.getMessage());
+            } catch (final Exception e) {
+                LOG.warn("Failed to get benchmark start marker: {}", e.getMessage());
+            }
+        } catch (final TimeoutException e) {
+            LOG.warn("Failed to put benchmark start marker due to timeout, but continuing anyway: {}", e.getMessage());
+        } catch (final Exception e) {
+            LOG.warn("Failed to put benchmark start marker, but continuing anyway: {}", e.getMessage());
+        }
 
         ConsoleReporter.forRegistry(KVMetrics.metricRegistry()) //
             .build() //
