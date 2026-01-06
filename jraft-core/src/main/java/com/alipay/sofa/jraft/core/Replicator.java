@@ -988,9 +988,13 @@ public class Replicator implements ThreadId.OnError {
         } else if (errCode != RaftError.ESTOP.getNumber()) {
             // Check if notify mode is enabled, if so, send notify instead of entries
             if (r.raftOptions.isEnableReplicatorNotify()) {
+                LOG.info("[REPLICATOR-CONTINUE] Replicator {} continue sending, nextIndex={}, use notify",
+                    r.options.getPeerId(), r.nextIndex);
                 // unlock in notifyNextIndex
                 r.notifyNextIndex(r.nextIndex);
             } else {
+                LOG.info("[REPLICATOR-CONTINUE] Replicator {} continue sending, nextIndex={}, use sendEntries",
+                    r.options.getPeerId(), r.nextIndex);
                 // id is unlock in _send_entries
                 r.sendEntries();
             }
@@ -1588,6 +1592,9 @@ public class Replicator implements ThreadId.OnError {
             // No entries and has empty data
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
+            
+            LOG.info("[NOTIFY-SEND] Replicator {} sending notify, nextIndex={}, hintIndex={}, term={}",
+                this.options.getPeerId(), nextIndex, request.getHintIndex(), this.options.getTerm());
             
             this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
                 new RpcResponseClosureAdapter<AppendEntriesResponse>() {

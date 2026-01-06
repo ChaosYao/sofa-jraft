@@ -1338,6 +1338,8 @@ public class NodeImpl implements Node, RaftServerService {
         @Override
         public void run(final Status status) {
             if (status.isOk()) {
+                LOG.info("[LEADER-APPEND-DONE] Node {} append entries [{}, {}] success, term={}",
+                    getNodeId(), this.firstLogIndex, this.firstLogIndex + this.nEntries - 1, NodeImpl.this.currTerm);
                 NodeImpl.this.ballotBox.commitAt(this.firstLogIndex, this.firstLogIndex + this.nEntries - 1,
                     NodeImpl.this.serverId);
             } else {
@@ -1389,6 +1391,11 @@ public class NodeImpl implements Node, RaftServerService {
                 task.entry.getId().setTerm(this.currTerm);
                 task.entry.setType(EnumOutter.EntryType.ENTRY_TYPE_DATA);
                 entries.add(task.entry);
+            }
+            if (!entries.isEmpty()) {
+                final long currentLastLogIndex = this.logManager.getLastLogIndex();
+                LOG.info("[LEADER-RECEIVE] Node {} received {} client data entries, term={}, currentLastLogIndex={}",
+                    getNodeId(), entries.size(), this.currTerm, currentLastLogIndex);
             }
             this.logManager.appendEntries(entries, new LeaderStableClosure(entries));
             // update conf.first

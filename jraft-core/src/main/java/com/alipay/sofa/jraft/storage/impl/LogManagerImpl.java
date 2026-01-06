@@ -320,6 +320,9 @@ public class LogManagerImpl implements LogManager {
             if (!entries.isEmpty()) {
                 done.setFirstLogIndex(entries.get(0).getId().getIndex());
                 this.logsInMemory.addAll(entries);
+                LOG.info("[LOG-APPEND] LogManager append {} entries, firstIndex={}, lastIndex={}",
+                    entries.size(), entries.get(0).getId().getIndex(), 
+                    entries.get(entries.size() - 1).getId().getIndex());
             }
             done.setEntries(entries);
 
@@ -399,6 +402,9 @@ public class LogManagerImpl implements LogManager {
         lock.unlock();
 
         final int waiterCount = wms.size();
+        if (waiterCount > 0) {
+            LOG.info("[LOG-WAKEUP] LogManager wakeup {} waiters, lastLogIndex={}", waiterCount, this.lastLogIndex);
+        }
         for (int i = 0; i < waiterCount; i++) {
             final WaitMeta wm = wms.get(i);
             wm.errorCode = errCode;
