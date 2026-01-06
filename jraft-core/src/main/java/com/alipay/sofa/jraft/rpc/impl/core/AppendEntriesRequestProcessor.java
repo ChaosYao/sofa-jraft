@@ -492,10 +492,20 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
 
             if (pulling.compareAndSet(false, true)) {
                 try {
-                    long currentIndex = request.getPrevLogIndex();
+                    if (!(node instanceof NodeImpl)) {
+                        return null;
+                    }
+                    final NodeImpl nodeImpl = (NodeImpl) node;
+                    long currentIndex = nodeImpl.getLogManager().getLastLogIndex();
                     
                     while (currentIndex < hintedLastIndex) {
-                        final Long nextLogIndex = pullLogEntry(node, request);
+                        final long prevLogTerm = nodeImpl.getLogManager().getTerm(currentIndex);
+                        final AppendEntriesRequest updatedRequest = AppendEntriesRequest.newBuilder(request)
+                            .setPrevLogIndex(currentIndex)
+                            .setPrevLogTerm(prevLogTerm)
+                            .build();
+                        
+                        final Long nextLogIndex = pullLogEntry(node, updatedRequest);
                         if (nextLogIndex != null && nextLogIndex > currentIndex) {
                             currentIndex = nextLogIndex;
                         } else {
@@ -620,14 +630,15 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                             public void run(final Status stableStatus) {
                                 synchronized (lock) {
                                     if (stableStatus.isOk()) {
-                                        nextLogIndex[0] = lastAppendedIndex;
+                                        final long actualLastLogIndex = nodeImpl.getLogManager().getLastLogIndex();
+                                        nextLogIndex[0] = actualLastLogIndex;
                                         if (committedIndex > 0) {
                                             nodeImpl.getBallotBox().setLastCommittedIndex(
-                                                Math.min(committedIndex, lastAppendedIndex));
+                                                Math.min(committedIndex, actualLastLogIndex));
                                         }
                                         success[0] = true;
-                                        LOG.info("[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} committedIndex={}",
-                                            nodeImpl.getNodeId(), request.getGroupId(), entriesCount, lastAppendedIndex, committedIndex);
+                                        LOG.info("[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} actualLastLogIndex={} committedIndex={}",
+                                            nodeImpl.getNodeId(), request.getGroupId(), entriesCount, lastAppendedIndex, actualLastLogIndex, committedIndex);
                                     } else {
                                         LOG.error("[NOTIFY-PULL] Node {} failed to append log entries: {}", 
                                             nodeImpl.getNodeId(), stableStatus);

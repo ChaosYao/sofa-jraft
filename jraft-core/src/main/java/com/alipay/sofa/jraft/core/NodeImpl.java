@@ -2168,7 +2168,7 @@ public class NodeImpl implements Node, RaftServerService {
 
             final PullLogEntryResponse response = responseBuilder.build();
 
-            if (entriesList.size() > 0 && this.state == State.STATE_LEADER) {
+            if (this.state == State.STATE_LEADER) {
                 final ThreadId replicatorId = this.replicatorGroup.getReplicator(serverId);
                 if (replicatorId != null) {
                     final long newNextIndex = prevLogIndex + 1 + entriesList.size();
