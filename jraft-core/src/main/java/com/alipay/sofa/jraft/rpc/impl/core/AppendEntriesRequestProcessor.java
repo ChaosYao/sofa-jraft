@@ -481,10 +481,6 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         final Node node = (Node) service;
         // Check if this is a notify request and enableReplicatorNotify is enabled
         if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
-            LOG.info("[NOTIFY] Node {} received NotifyRequest from {} groupId={} term={} prevLogIndex={} hintIndex={}",
-                node.getNodeId(), request.getServerId(), request.getGroupId(), request.getTerm(),
-                request.getPrevLogIndex(), request.getHintIndex());
-
             final AppendEntriesResponse response = AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                 .setSuccess(true).build();
             done.getRpcCtx().sendResponse(response);
@@ -497,24 +493,15 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             if (pulling.compareAndSet(false, true)) {
                 try {
                     long currentIndex = request.getPrevLogIndex();
-                    LOG.info("[NOTIFY] Node {} starting to pull log entries, groupId={}, currentIndex={}, hintedLastIndex={}",
-                        node.getNodeId(), request.getGroupId(), currentIndex, hintedLastIndex);
                     
                     while (currentIndex < hintedLastIndex) {
                         final Long nextLogIndex = pullLogEntry(node, request);
                         if (nextLogIndex != null && nextLogIndex > currentIndex) {
-                            LOG.info("[NOTIFY] Node {} pulled log entries successfully, groupId={}, currentIndex={} -> nextLogIndex={}",
-                                node.getNodeId(), request.getGroupId(), currentIndex, nextLogIndex);
                             currentIndex = nextLogIndex;
                         } else {
-                            LOG.info("[NOTIFY] Node {} stopped pulling log entries, groupId={}, currentIndex={}, nextLogIndex={}",
-                                node.getNodeId(), request.getGroupId(), currentIndex, nextLogIndex);
                             break;
                         }
                     }
-                    
-                    LOG.info("[NOTIFY] Node {} finished pulling log entries, groupId={}, finalIndex={}",
-                        node.getNodeId(), request.getGroupId(), currentIndex);
                 } catch (final Exception e) {
                     LOG.error("[NOTIFY] Failed to pull log entries for notify request, groupId={}, peerId={}, "
                               + "currentIndex={}, hintedLastIndex={}", request.getGroupId(), request.getPeerId(),
@@ -522,9 +509,6 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                 } finally {
                     pulling.set(false);
                 }
-            } else {
-                LOG.info("[NOTIFY] Node {} skipping pull log entries, already pulling, groupId={}",
-                    node.getNodeId(), request.getGroupId());
             }
 
             return null;

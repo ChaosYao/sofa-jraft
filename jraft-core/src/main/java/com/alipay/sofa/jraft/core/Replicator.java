@@ -986,8 +986,14 @@ public class Replicator implements ThreadId.OnError {
             // last_index of this followers is less than |next_index - 1|
             r.sendEmptyEntries(false);
         } else if (errCode != RaftError.ESTOP.getNumber()) {
-            // id is unlock in _send_entries
-            r.sendEntries();
+            // Check if notify mode is enabled, if so, send notify instead of entries
+            if (r.raftOptions.isEnableReplicatorNotify()) {
+                // unlock in notifyNextIndex
+                r.notifyNextIndex(r.nextIndex);
+            } else {
+                // id is unlock in _send_entries
+                r.sendEntries();
+            }
         } else {
             LOG.warn("Replicator {} stops sending entries.", id);
             id.unlock();
@@ -1583,26 +1589,12 @@ public class Replicator implements ThreadId.OnError {
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
             
-            // Send RPC with callback for logging
-            LOG.info("[NOTIFY] Node {} sending NotifyRequest to {} term {} nextIndex {} hintIndex {}", 
-                this.options.getNode().getNodeId(), this.options.getPeerId(), 
-                this.options.getTerm(), nextIndex, request.getHintIndex());
-            
             this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
                 new RpcResponseClosureAdapter<AppendEntriesResponse>() {
 
                     @Override
                     public void run(final Status status) {
-                        if (status.isOk()) {
-                            LOG.info("[NOTIFY] Node {} received NotifyResponse from {} term {} nextIndex {} success",
-                                Replicator.this.options.getNode().getNodeId(),
-                                Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex);
-                        } else {
-                            LOG.warn("[NOTIFY] Node {} received NotifyResponse from {} term {} nextIndex {} failed: {}",
-                                Replicator.this.options.getNode().getNodeId(),
-                                Replicator.this.options.getPeerId(), Replicator.this.options.getTerm(), nextIndex,
-                                status);
-                        }
+                        // Notify response callback - no logging needed
                     }
                 });
         } finally {
