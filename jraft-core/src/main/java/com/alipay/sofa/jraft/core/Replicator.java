@@ -1604,6 +1604,17 @@ public class Replicator implements ThreadId.OnError {
                         // Notify response callback - no logging needed
                     }
                 });
+            
+            // After sending notify, register waiter to wait for new entries
+            // This ensures that when new entries arrive, we can continue sending notify
+            if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
+                installSnapshot();
+                return;
+            }
+            // Always register waiter to wait for new entries, even if there are more entries now
+            // because follower will pull them, and we need to be notified when new entries arrive
+            waitMoreEntries(nextIndex);
+            return;
         } finally {
             this.id.unlock();
         }
