@@ -592,36 +592,14 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                         lock.notify();
                         return;
                     }
-                    
-                    // 只打印 response 中的 data 数据
-                    if (response.hasData() && !response.getData().isEmpty()) {
-                        final byte[] responseData = response.getData().toByteArray();
-                        LOG.info("[NOTIFY-PULL] PullLogEntryResponse.data: size={}, hex={}, utf8={}", 
-                            responseData.length, 
-                            bytesToHex(responseData),
-                            new String(responseData));
-                    } else {
-                        LOG.info("[NOTIFY-PULL] PullLogEntryResponse has no data");
-                    }
+
 
                     try {
                         final List<LogEntry> entries = convertResponseToLogEntries(response, prevLogIndex + 1);
                         
                         // 只打印 LogEntry 中的具体数据内容
                         LOG.info("[NOTIFY-PULL] Converted LogEntry data: count={}", entries.size());
-                        for (int i = 0; i < entries.size(); i++) {
-                            final LogEntry entry = entries.get(i);
-                            if (entry.getData() != null && entry.getData().remaining() > 0) {
-                                final byte[] dataBytes = new byte[entry.getData().remaining()];
-                                entry.getData().duplicate().get(dataBytes);
-                                LOG.info("[NOTIFY-PULL] LogEntry[{}] data: index={}, term={}, size={}, hex={}, utf8={}", 
-                                    i, entry.getId().getIndex(), entry.getId().getTerm(), 
-                                    dataBytes.length, bytesToHex(dataBytes), new String(dataBytes));
-                            } else {
-                                LOG.info("[NOTIFY-PULL] LogEntry[{}] has no data: index={}, term={}", 
-                                    i, entry.getId().getIndex(), entry.getId().getTerm());
-                            }
-                        }
+
                         if (entries.isEmpty()) {
                             nextLogIndex[0] = prevLogIndex + 1;
                             if (response.hasCommittedIndex()) {
