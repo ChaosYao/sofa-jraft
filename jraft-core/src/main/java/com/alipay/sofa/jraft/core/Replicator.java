@@ -1580,6 +1580,7 @@ public class Replicator implements ThreadId.OnError {
         final AppendEntriesRequest.Builder rb = AppendEntriesRequest.newBuilder();
         fillCommonFields(rb, nextIndex - 1, false);
         
+        boolean doUnlock = true;
         try {
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
@@ -1597,18 +1598,17 @@ public class Replicator implements ThreadId.OnError {
                     }
                 });
             
-            // After sending notify, register waiter to wait for new entries
-            // This ensures that when new entries arrive, we can continue sending notify
             if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
                 installSnapshot();
+                doUnlock = false;
                 return;
             }
-            // Always register waiter to wait for new entries, even if there are more entries now
-            // because follower will pull them, and we need to be notified when new entries arrive
             waitMoreEntries(nextIndex);
-            return;
+            doUnlock = false;
         } finally {
-            this.id.unlock();
+            if (doUnlock) {
+                this.id.unlock();
+            }
         }
     }
 
