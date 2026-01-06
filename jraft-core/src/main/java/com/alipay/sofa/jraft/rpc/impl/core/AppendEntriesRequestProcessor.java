@@ -481,6 +481,10 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         final Node node = (Node) service;
         // Check if this is a notify request and enableReplicatorNotify is enabled
         if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
+            LOG.info("[NOTIFY-RECEIVE] Node {} received NotifyRequest from {} groupId={} term={} prevLogIndex={} hintIndex={}",
+                node.getNodeId(), request.getServerId(), request.getGroupId(), request.getTerm(),
+                request.getPrevLogIndex(), request.getHintIndex());
+            
             final AppendEntriesResponse response = AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                 .setSuccess(true).build();
             done.getRpcCtx().sendResponse(response);

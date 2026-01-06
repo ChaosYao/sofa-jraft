@@ -986,16 +986,9 @@ public class Replicator implements ThreadId.OnError {
             // last_index of this followers is less than |next_index - 1|
             r.sendEmptyEntries(false);
         } else if (errCode != RaftError.ESTOP.getNumber()) {
-            // Check if notify mode is enabled, if so, send notify instead of entries
             if (r.raftOptions.isEnableReplicatorNotify()) {
-                LOG.info("[REPLICATOR-CONTINUE] Replicator {} continue sending, nextIndex={}, use notify",
-                    r.options.getPeerId(), r.nextIndex);
-                // unlock in notifyNextIndex
                 r.notifyNextIndex(r.nextIndex);
             } else {
-                LOG.info("[REPLICATOR-CONTINUE] Replicator {} continue sending, nextIndex={}, use sendEntries",
-                    r.options.getPeerId(), r.nextIndex);
-                // id is unlock in _send_entries
                 r.sendEntries();
             }
         } else {
@@ -1588,13 +1581,12 @@ public class Replicator implements ThreadId.OnError {
         fillCommonFields(rb, nextIndex - 1, false);
         
         try {
-            // Notify request: hintIndex is already set to latest log index in fillCommonFields
-            // No entries and has empty data
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
             
-            LOG.info("[NOTIFY-SEND] Replicator {} sending notify, nextIndex={}, hintIndex={}, term={}",
-                this.options.getPeerId(), nextIndex, request.getHintIndex(), this.options.getTerm());
+            LOG.info("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
+                this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, 
+                request.getHintIndex(), this.options.getTerm());
             
             this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
                 new RpcResponseClosureAdapter<AppendEntriesResponse>() {
