@@ -31,6 +31,9 @@ import io.grpc.MethodDescriptor;
 import io.grpc.Server;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
+import io.grpc.Status;
+import io.grpc.StatusException;
+import io.grpc.StatusRuntimeException;
 import io.grpc.ServerInterceptors;
 import io.grpc.ServerServiceDefinition;
 import io.grpc.protobuf.ProtoUtils;
@@ -153,7 +156,14 @@ public class GrpcServer implements RpcServer {
                                 responseObserver.onNext((Message) responseObj);
                                 responseObserver.onCompleted();
                             } catch (final Throwable t) {
-                                LOG.warn("[GRPC] failed to send response.", t);
+                                final Status.Code code = getGrpcStatusCode(t);
+                                if (code == Status.Code.CANCELLED) {
+                                    if (LOG.isDebugEnabled()) {
+                                        LOG.debug("[GRPC] response send cancelled by remote peer: {}.", t.getMessage());
+                                    }
+                                } else {
+                                    LOG.warn("[GRPC] failed to send response.", t);
+                                }
                             }
                         }
 
@@ -230,5 +240,15 @@ public class GrpcServer implements RpcServer {
     private void registerDefaultServerInterceptor() {
         this.serverInterceptors.add(new RemoteAddressInterceptor());
         this.serverInterceptors.add(new ConnectionInterceptor());
+    }
+
+    private static Status.Code getGrpcStatusCode(final Throwable t) {
+        if (t instanceof StatusRuntimeException) {
+            return ((StatusRuntimeException) t).getStatus().getCode();
+        }
+        if (t instanceof StatusException) {
+            return ((StatusException) t).getStatus().getCode();
+        }
+        return null;
     }
 }
