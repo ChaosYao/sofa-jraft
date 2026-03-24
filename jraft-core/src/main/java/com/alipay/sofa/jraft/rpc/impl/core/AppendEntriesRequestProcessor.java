@@ -481,10 +481,11 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
         final Node node = (Node) service;
         // Check if this is a notify request and enableReplicatorNotify is enabled
         if (node.getRaftOptions().isEnableReplicatorNotify() && isNotifyRequest(request)) {
-            LOG.info("[NOTIFY-RECEIVE] Node {} received NotifyRequest from {} groupId={} term={} prevLogIndex={} hintIndex={}",
+            LOG.info(
+                "[NOTIFY-RECEIVE] Node {} received NotifyRequest from {} groupId={} term={} prevLogIndex={} hintIndex={}",
                 node.getNodeId(), request.getServerId(), request.getGroupId(), request.getTerm(),
                 request.getPrevLogIndex(), request.getHintIndex());
-            
+
             final AppendEntriesResponse response = AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                 .setSuccess(true).build();
             done.getRpcCtx().sendResponse(response);
@@ -501,14 +502,12 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                     }
                     final NodeImpl nodeImpl = (NodeImpl) node;
                     long currentIndex = nodeImpl.getLogManager().getLastLogIndex();
-                    
+
                     while (currentIndex < hintedLastIndex) {
                         final long prevLogTerm = nodeImpl.getLogManager().getTerm(currentIndex);
                         final AppendEntriesRequest updatedRequest = AppendEntriesRequest.newBuilder(request)
-                            .setPrevLogIndex(currentIndex)
-                            .setPrevLogTerm(prevLogTerm)
-                            .build();
-                        
+                            .setPrevLogIndex(currentIndex).setPrevLogTerm(prevLogTerm).build();
+
                         final Long nextLogIndex = pullLogEntry(node, updatedRequest);
                         if (nextLogIndex != null && nextLogIndex > currentIndex) {
                             currentIndex = nextLogIndex;
@@ -579,7 +578,8 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             .setServerId(nodeImpl.getServerId().toString()).setPeerId(leaderId.toString()).setTerm(request.getTerm())
             .setPrevLogIndex(prevLogIndex).setPrevLogTerm(prevLogTerm).build();
 
-        LOG.info("[NOTIFY-PULL] Node {} sending PullLogEntryRequest to leader {} groupId={} term={} prevLogIndex={} prevLogTerm={}",
+        LOG.info(
+            "[NOTIFY-PULL] Node {} sending PullLogEntryRequest to leader {} groupId={} term={} prevLogIndex={} prevLogTerm={}",
             nodeImpl.getNodeId(), leaderId, request.getGroupId(), request.getTerm(), prevLogIndex, prevLogTerm);
 
         final long[] nextLogIndex = new long[1];
@@ -591,7 +591,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             public void run(final Status status) {
                 synchronized (lock) {
                     if (!status.isOk()) {
-                        LOG.warn("[NOTIFY-PULL] Node {} failed to pull log entries from leader {}: {}", 
+                        LOG.warn("[NOTIFY-PULL] Node {} failed to pull log entries from leader {}: {}",
                             nodeImpl.getNodeId(), leaderId, status);
                         success[0] = false;
                         lock.notify();
@@ -600,17 +600,16 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
 
                     final PullLogEntryResponse response = getResponse();
                     if (response == null || !response.getSuccess()) {
-                        LOG.warn("[NOTIFY-PULL] Node {} pull log entries failed from leader {}, success={}", 
+                        LOG.warn("[NOTIFY-PULL] Node {} pull log entries failed from leader {}, success={}",
                             nodeImpl.getNodeId(), leaderId, response != null && response.getSuccess());
                         success[0] = false;
                         lock.notify();
                         return;
                     }
 
-
                     try {
                         final List<LogEntry> entries = convertResponseToLogEntries(response, prevLogIndex + 1);
-                        
+
                         // 只打印 LogEntry 中的具体数据内容
                         LOG.info("[NOTIFY-PULL] Converted LogEntry data: count={}", entries.size());
 
@@ -641,10 +640,12 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                                                 Math.min(committedIndex, actualLastLogIndex));
                                         }
                                         success[0] = true;
-                                        LOG.info("[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} actualLastLogIndex={} committedIndex={}",
-                                            nodeImpl.getNodeId(), request.getGroupId(), entriesCount, lastAppendedIndex, actualLastLogIndex, committedIndex);
+                                        LOG.info(
+                                            "[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} actualLastLogIndex={} committedIndex={}",
+                                            nodeImpl.getNodeId(), request.getGroupId(), entriesCount,
+                                            lastAppendedIndex, actualLastLogIndex, committedIndex);
                                     } else {
-                                        LOG.error("[NOTIFY-PULL] Node {} failed to append log entries: {}", 
+                                        LOG.error("[NOTIFY-PULL] Node {} failed to append log entries: {}",
                                             nodeImpl.getNodeId(), stableStatus);
                                         success[0] = false;
                                     }
@@ -685,7 +686,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
     private List<LogEntry> convertResponseToLogEntries(final PullLogEntryResponse response, final long startIndex) {
         final List<LogEntry> entries = new ArrayList<>();
         final List<RaftOutter.EntryMeta> entriesList = response.getEntriesList();
-        
+
         if (entriesList.isEmpty()) {
             return entries;
         }
@@ -703,7 +704,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             }
             currentIndex++;
         }
-        
+
         return entries;
     }
 
@@ -715,7 +716,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             if (entry.hasChecksum()) {
                 logEntry.setChecksum(entry.getChecksum());
             }
-            
+
             final long dataLen = entry.getDataLen();
             if (dataLen > 0 && allData != null) {
                 if (allData.remaining() < dataLen) {
@@ -739,7 +740,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                 throw new IllegalStateException(
                     "Invalid log entry that contains zero peers but is ENTRY_TYPE_CONFIGURATION type");
             }
-            
+
             return logEntry;
         }
         return null;

@@ -2019,10 +2019,10 @@ public class NodeImpl implements Node, RaftServerService {
     @Override
     public Message handlePullLogEntryRequest(final PullLogEntryRequest request, final RpcRequestClosure done) {
         //TODO 有必要吗
-        LOG.info("[PULL-ENTRY] Node {} handling PullLogEntryRequest groupId={} from {} term={} prevLogIndex={} prevLogTerm={}",
-            getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), 
-            request.getPrevLogIndex(), request.getPrevLogTerm());
-        
+        LOG.info(
+            "[PULL-ENTRY] Node {} handling PullLogEntryRequest groupId={} from {} term={} prevLogIndex={} prevLogTerm={}",
+            getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), request.getPrevLogIndex(),
+            request.getPrevLogTerm());
 
         try {
             if (!this.state.isActive()) {
@@ -2044,8 +2044,8 @@ public class NodeImpl implements Node, RaftServerService {
             }
 
             if (request.getTerm() < this.currTerm) {
-                LOG.warn("[PULL-ENTRY] Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.", getNodeId(),
-                    request.getServerId(), request.getTerm(), this.currTerm);
+                LOG.warn("[PULL-ENTRY] Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.",
+                    getNodeId(), request.getServerId(), request.getTerm(), this.currTerm);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
                     .setSuccess(false) //
@@ -2136,9 +2136,10 @@ public class NodeImpl implements Node, RaftServerService {
                 currentIndex++;
             }
 
-            LOG.info("[PULL-ENTRY] Node {} preparing response with entries, groupId={} entriesCount={} fromIndex={} toIndex={}",
+            LOG.info(
+                "[PULL-ENTRY] Node {} preparing response with entries, groupId={} entriesCount={} fromIndex={} toIndex={}",
                 getNodeId(), request.getGroupId(), entriesList.size(), nextIndex, currentIndex - 1);
-            
+
             final PullLogEntryResponse.Builder responseBuilder = PullLogEntryResponse.newBuilder() //
                 .setTerm(this.currTerm) //
                 .setSuccess(true) //
@@ -2171,8 +2172,8 @@ public class NodeImpl implements Node, RaftServerService {
 
             return response;
         } catch (Exception e) {
-            LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}",
-                getNodeId(), request.getGroupId(), e);
+            LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}", getNodeId(),
+                request.getGroupId(), e);
             return null;
         }
     }

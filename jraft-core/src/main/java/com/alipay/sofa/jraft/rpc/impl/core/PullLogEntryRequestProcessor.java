@@ -51,17 +51,19 @@ public class PullLogEntryRequestProcessor extends NodeRequestProcessor<PullLogEn
     public Message processRequest0(final RaftServerService service, final PullLogEntryRequest request,
                                    final RpcRequestClosure done) {
         LOG.info("[PULL-ENTRY] Received PullLogEntryRequest groupId={} from {} term={} prevLogIndex={} prevLogTerm={}",
-            request.getGroupId(), request.getServerId(), request.getTerm(), request.getPrevLogIndex(), request.getPrevLogTerm());
-        
+            request.getGroupId(), request.getServerId(), request.getTerm(), request.getPrevLogIndex(),
+            request.getPrevLogTerm());
+
         final Message response = service.handlePullLogEntryRequest(request, done);
-        
+
         if (response instanceof RpcRequests.PullLogEntryResponse) {
             final RpcRequests.PullLogEntryResponse pullResponse = (RpcRequests.PullLogEntryResponse) response;
-            LOG.info("[PULL-ENTRY] Sending PullLogEntryResponse groupId={} to {} success={} entriesCount={} lastLogIndex={}",
-                request.getGroupId(), request.getServerId(), pullResponse.getSuccess(), 
-                pullResponse.getEntriesCount(), pullResponse.getLastLogIndex());
+            LOG.info(
+                "[PULL-ENTRY] Sending PullLogEntryResponse groupId={} to {} success={} entriesCount={} lastLogIndex={}",
+                request.getGroupId(), request.getServerId(), pullResponse.getSuccess(), pullResponse.getEntriesCount(),
+                pullResponse.getLastLogIndex());
         }
-        
+
         return response;
     }
 

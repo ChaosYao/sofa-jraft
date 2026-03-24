@@ -93,6 +93,9 @@ public class Replicator implements ThreadId.OnError {
     private volatile long                    heartbeatCounter       = 0;
     private volatile long                    appendEntriesCounter   = 0;
     private volatile long                    installSnapshotCounter = 0;
+    /** Last notify RPC content; skip send when leader {@code hintIndex} and term are unchanged. */
+    private long                             lastNotifyHintIndex    = -1;
+    private long                             lastNotifyTerm         = -1;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -1579,25 +1582,32 @@ public class Replicator implements ThreadId.OnError {
     void notifyNextIndex(final long nextIndex) {
         final AppendEntriesRequest.Builder rb = AppendEntriesRequest.newBuilder();
         fillCommonFields(rb, nextIndex - 1, false);
-        
+
         boolean doUnlock = true;
         try {
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
-            
-            LOG.info("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
-                this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, 
-                request.getHintIndex(), this.options.getTerm());
-            
-            this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
-                new RpcResponseClosureAdapter<AppendEntriesResponse>() {
 
-                    @Override
-                    public void run(final Status status) {
-                        // Notify response callback - no logging needed
-                    }
-                });
-            
+            final long hintIndex = request.getHintIndex();
+            final long term = request.getTerm();
+            final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
+
+            if (!redundantNotify) {
+                this.lastNotifyHintIndex = hintIndex;
+                this.lastNotifyTerm = term;
+                LOG.info("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
+                    this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
+
+                this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
+                    new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+
+                        @Override
+                        public void run(final Status status) {
+                            // Notify response callback - no logging needed
+                        }
+                    });
+            }
+
             if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
                 installSnapshot();
                 doUnlock = false;
