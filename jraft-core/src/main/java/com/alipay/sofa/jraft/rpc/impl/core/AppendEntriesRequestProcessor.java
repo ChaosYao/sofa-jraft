@@ -827,7 +827,11 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                 }
             }
         } else {
-            LOG.info("Connection disconnected: {}", remoteAddress);
+            // Short-lived or non-replication connections (e.g. probes, localhost sidecars) often have no PeerPair;
+            // avoid INFO spam — enable DEBUG when diagnosing connection churn.
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Connection disconnected (no raft peer pair on connection): {}", remoteAddress);
+            }
         }
     }
 
