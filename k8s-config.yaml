@@ -247,7 +247,7 @@ spec:
         - name: raft-client
           image: raft-demo:latest1
           imagePullPolicy: IfNotPresent
-          args: ["client", "/conf/client.yaml", "1", "1", "0", "1024"]
+          args: ["client", "/conf/client.yaml", "1", "1", "0", "1024", "20"]
           volumeMounts:
             - name: conf
               mountPath: /conf

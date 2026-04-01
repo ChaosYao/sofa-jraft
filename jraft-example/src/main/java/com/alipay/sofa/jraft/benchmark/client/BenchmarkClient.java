@@ -61,7 +61,7 @@ public class BenchmarkClient {
 
     public static void main(final String[] args) {
         if (args.length < 6) {
-            LOG.error("Args: [configPath], [threads], [writeRatio], [readRatio], [valueSize] are needed.");
+            LOG.error("Args: [configPath], [threads], [writeRatio], [readRatio], [valueSize], [throttleSleepMs](optional) are needed.");
             System.exit(-1);
         }
         final String configPath = args[1];
@@ -69,6 +69,7 @@ public class BenchmarkClient {
         final int writeRatio = Integer.parseInt(args[3]);
         final int readRatio = Integer.parseInt(args[4]);
         final int valueSize = Integer.parseInt(args[5]);
+        final int throttleSleepMs = args.length >= 7 ? Integer.parseInt(args[6]) : 0;
 
         final RheaKVStoreOptions opts = Yaml.readConfig(configPath);
 
@@ -103,8 +104,9 @@ public class BenchmarkClient {
         // Run benchmark in a loop, repeating every 2 minutes
         while (true) {
             LOG.info("Starting new benchmark cycle...");
-            startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, regionRouteTableOptionsList);
-            
+            startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, throttleSleepMs,
+                regionRouteTableOptionsList);
+
             // Run benchmark for 2 minutes
             try {
                 Thread.sleep(2 * 60 * 1000); // 2 minutes
@@ -113,11 +115,11 @@ public class BenchmarkClient {
                 Thread.currentThread().interrupt();
                 break;
             }
-            
+
             // Stop current benchmark threads
             LOG.info("Stopping current benchmark cycle...");
             stopBenchmark();
-            
+
             // Wait for 2 minutes before next cycle
             LOG.info("Waiting 2 minutes before next cycle...");
             try {
@@ -128,20 +130,23 @@ public class BenchmarkClient {
                 break;
             }
         }
-        
+
         // Cleanup
         rheaKVStore.shutdown();
     }
 
-    private static volatile boolean shouldStop = false;
-    private static Thread[] benchmarkThreads = null;
+    private static volatile boolean shouldStop       = false;
+    private static Thread[]         benchmarkThreads = null;
 
-    public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int writeRatio, final int readRatio,
-                                      final int valueSize, final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
+    public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int writeRatio,
+                                      final int readRatio, final int valueSize, final int throttleSleepMs,
+                                      final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
         shouldStop = false;
         benchmarkThreads = new Thread[threads];
         for (int i = 0; i < threads; i++) {
-            final Thread t = new Thread(() -> doRequest(rheaKVStore, writeRatio, readRatio, valueSize, regionRouteTableOptionsList));
+            final Thread t = new Thread(
+                () -> doRequest(rheaKVStore, writeRatio, readRatio, valueSize, throttleSleepMs,
+                    regionRouteTableOptionsList));
             t.setDaemon(false); // Changed to non-daemon so they don't exit when main thread sleeps
             benchmarkThreads[i] = t;
             t.start();
@@ -165,7 +170,8 @@ public class BenchmarkClient {
         }
     }
 
-    public static void doRequest(final RheaKVStore rheaKVStore, final int writeRatio, final int readRatio, final int valueSize,
+    public static void doRequest(final RheaKVStore rheaKVStore, final int writeRatio, final int readRatio,
+                                 final int valueSize, final int throttleSleepMs,
                                  final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
         final int regionSize = regionRouteTableOptionsList.size();
         final ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -177,6 +183,14 @@ public class BenchmarkClient {
         random.nextBytes(valeBytes);
         while (!shouldStop) {
             try {
+                if (throttleSleepMs > 0) {
+                    try {
+                        Thread.sleep(throttleSleepMs);
+                    } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
                 try {
                     slidingWindow.acquire();
                 } catch (final Exception e) {
