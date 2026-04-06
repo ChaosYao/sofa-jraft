@@ -2024,6 +2024,8 @@ public class NodeImpl implements Node, RaftServerService {
             getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), request.getPrevLogIndex(),
             request.getPrevLogTerm());
 
+        this.metrics.recordTimes("pull-log-entry-concurrent", 1);
+        final long startMs = Utils.monotonicMs();
         try {
             if (!this.state.isActive()) {
                 LOG.warn("[PULL-ENTRY] Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
@@ -2046,6 +2048,7 @@ public class NodeImpl implements Node, RaftServerService {
             if (request.getTerm() < this.currTerm) {
                 LOG.warn("[PULL-ENTRY] Node {} ignore stale PullLogEntryRequest from {}, term={}, currTerm={}.",
                     getNodeId(), request.getServerId(), request.getTerm(), this.currTerm);
+                this.metrics.recordTimes("pull-log-entry-stale-term", 1);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
                     .setSuccess(false) //
@@ -2064,6 +2067,7 @@ public class NodeImpl implements Node, RaftServerService {
                     "[PULL-ENTRY] Node {} reject term_unmatched PullLogEntryRequest from {}, term={}, prevLogIndex={}, prevLogTerm={}, localPrevLogTerm={}, lastLogIndex={}.",
                     getNodeId(), request.getServerId(), request.getTerm(), prevLogIndex, prevLogTerm, localPrevLogTerm,
                     lastLogIndex);
+                this.metrics.recordTimes("pull-log-entry-term-unmatched", 1);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
                     .setSuccess(false) //
@@ -2162,6 +2166,9 @@ public class NodeImpl implements Node, RaftServerService {
 
             final PullLogEntryResponse response = responseBuilder.build();
 
+            this.metrics.recordSize("pull-log-entry-entries-count", entriesList.size());
+            this.metrics.recordSize("pull-log-entry-data-size", totalDataSize);
+
             if (this.state == State.STATE_LEADER) {
                 final ThreadId replicatorId = this.replicatorGroup.getReplicator(serverId);
                 if (replicatorId != null) {
@@ -2174,7 +2181,11 @@ public class NodeImpl implements Node, RaftServerService {
         } catch (Exception e) {
             LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}", getNodeId(),
                 request.getGroupId(), e);
+            this.metrics.recordTimes("pull-log-entry-exception", 1);
             return null;
+        } finally {
+            this.metrics.recordLatency("pull-log-entry", Utils.monotonicMs() - startMs);
+            this.metrics.recordTimes("pull-log-entry-concurrent", -1);
         }
     }
 
