@@ -17,15 +17,14 @@
 package com.alipay.sofa.jraft.benchmark.client;
 
 import java.util.ArrayDeque;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,31 +47,36 @@ import com.codahale.metrics.ConsoleReporter;
 import com.codahale.metrics.Timer;
 
 /**
+ * Benchmark client that sends a fixed number of put operations then exits.
+ *
+ * Usage: BenchmarkClient [configPath] [threads] [valueSize] [throttleSleepMs](optional) [putCount](optional, default 300)
+ *
+ * putCount can also be set via system property: -DputCount=300
+ *
  * @author jiachun.fjc
  */
 public class BenchmarkClient {
 
-    private static final Logger LOG      = LoggerFactory.getLogger(BenchmarkClient.class);
+    private static final Logger LOG               = LoggerFactory.getLogger(BenchmarkClient.class);
 
-    private static final byte[] BYTES    = new byte[] { 0, 1 };
-    private static final Timer  putTimer = KVMetrics.timer("put_benchmark_timer");
-    private static final Timer  getTimer = KVMetrics.timer("get_benchmark_timer");
-    private static final Timer  timer    = KVMetrics.timer("benchmark_timer");
+    private static final int    DEFAULT_PUT_COUNT = 300;
+
+    private static final Timer  putTimer          = KVMetrics.timer("put_benchmark_timer");
 
     public static void main(final String[] args) {
-        if (args.length < 6) {
-            LOG.error("Args: [configPath], [threads], [writeRatio], [readRatio], [valueSize], [throttleSleepMs](optional) are needed.");
+        if (args.length < 3) {
+            LOG.error(
+                "Args: [configPath], [threads], [valueSize], [throttleSleepMs](optional), [putCount](optional, default {})"
+                        + " are needed. putCount can also be set via -DputCount=N.", DEFAULT_PUT_COUNT);
             System.exit(-1);
         }
         final String configPath = args[1];
         final int threads = Integer.parseInt(args[2]);
-        final int writeRatio = Integer.parseInt(args[3]);
-        final int readRatio = Integer.parseInt(args[4]);
-        final int valueSize = Integer.parseInt(args[5]);
-        final int throttleSleepMs = args.length >= 7 ? Integer.parseInt(args[6]) : 0;
+        final int valueSize = Integer.parseInt(args[3]);
+        final int throttleSleepMs = args.length >= 5 ? Integer.parseInt(args[4]) : 0;
+        final int putCount = resolvePutCount(args);
 
         final RheaKVStoreOptions opts = Yaml.readConfig(configPath);
-
         final RheaKVStore rheaKVStore = new DefaultRheaKVStore();
         if (!rheaKVStore.init(opts)) {
             LOG.error("Fail to init [RheaKVStore]");
@@ -81,161 +85,106 @@ public class BenchmarkClient {
 
         final List<RegionRouteTableOptions> regionRouteTableOptionsList = opts.getPlacementDriverOptions()
             .getRegionRouteTableOptionsList();
-
         rebalance(rheaKVStore, opts.getInitialServerList(), regionRouteTableOptionsList);
-
-        // Try to put benchmark start marker, but don't fail if it times out
-        try {
-            rheaKVStore.bPut("benchmark", BytesUtil.writeUtf8("benchmark start at: " + new Date()));
-            try {
-                LOG.info(BytesUtil.readUtf8(rheaKVStore.bGet("benchmark")));
-            } catch (final Exception e) {
-                LOG.warn("Failed to get benchmark start marker, but continuing anyway: {}", e.getMessage());
-            }
-        } catch (final Exception e) {
-            LOG.warn("Failed to put benchmark start marker, but continuing anyway: {}", e.getMessage());
-        }
 
         ConsoleReporter.forRegistry(KVMetrics.metricRegistry()) //
             .build() //
             .start(30, TimeUnit.SECONDS);
 
-        LOG.info("Start benchmark with 2-minute intervals...");
-        // Run benchmark in a loop, repeating every 2 minutes
-        while (true) {
-            LOG.info("Starting new benchmark cycle...");
-            startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, throttleSleepMs,
-                regionRouteTableOptionsList);
+        LOG.info("Starting benchmark: threads={}, valueSize={}, throttleSleepMs={}, putCount={}", threads, valueSize,
+            throttleSleepMs, putCount);
 
-            // Run benchmark for 2 minutes
-            try {
-                Thread.sleep(2 * 60 * 1000); // 2 minutes
-            } catch (final InterruptedException e) {
-                LOG.warn("Benchmark interrupted, exiting...");
-                Thread.currentThread().interrupt();
-                break;
-            }
+        final long startMs = System.currentTimeMillis();
+        runPuts(rheaKVStore, threads, valueSize, throttleSleepMs, regionRouteTableOptionsList, putCount);
+        final long elapsed = System.currentTimeMillis() - startMs;
 
-            // Stop current benchmark threads
-            LOG.info("Stopping current benchmark cycle...");
-            stopBenchmark();
+        LOG.info("Benchmark finished: {} puts completed in {} ms ({} puts/sec)", putCount, elapsed,
+            elapsed > 0 ? putCount * 1000L / elapsed : 0);
 
-            // Wait for 2 minutes before next cycle
-            LOG.info("Waiting 2 minutes before next cycle...");
-            try {
-                Thread.sleep(2 * 60 * 1000); // 2 minutes
-            } catch (final InterruptedException e) {
-                LOG.warn("Benchmark interrupted, exiting...");
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-
-        // Cleanup
         rheaKVStore.shutdown();
     }
 
-    private static volatile boolean shouldStop       = false;
-    private static Thread[]         benchmarkThreads = null;
+    /**
+     * Resolves putCount from CLI args (position 5) or system property -DputCount, defaulting to 300.
+     */
+    private static int resolvePutCount(final String[] args) {
+        if (args.length >= 6) {
+            return Integer.parseInt(args[5]);
+        }
+        final String sysProp = System.getProperty("putCount");
+        if (sysProp != null) {
+            return Integer.parseInt(sysProp);
+        }
+        return DEFAULT_PUT_COUNT;
+    }
 
-    public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int writeRatio,
-                                      final int readRatio, final int valueSize, final int throttleSleepMs,
-                                      final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
-        shouldStop = false;
-        benchmarkThreads = new Thread[threads];
+    /**
+     * Runs exactly {@code putCount} puts distributed across {@code threads} worker threads,
+     * then returns once all puts have completed.
+     */
+    public static void runPuts(final RheaKVStore rheaKVStore, final int threads, final int valueSize,
+                               final int throttleSleepMs,
+                               final List<RegionRouteTableOptions> regionRouteTableOptionsList, final int putCount) {
+        final AtomicInteger toIssue = new AtomicInteger(putCount);
+        final CountDownLatch done = new CountDownLatch(putCount);
+
+        final Thread[] workers = new Thread[threads];
         for (int i = 0; i < threads; i++) {
             final Thread t = new Thread(
-                () -> doRequest(rheaKVStore, writeRatio, readRatio, valueSize, throttleSleepMs,
-                    regionRouteTableOptionsList));
-            t.setDaemon(false); // Changed to non-daemon so they don't exit when main thread sleeps
-            benchmarkThreads[i] = t;
+                () -> putWorker(rheaKVStore, valueSize, throttleSleepMs, regionRouteTableOptionsList, toIssue, done));
+            t.setDaemon(true);
+            workers[i] = t;
             t.start();
         }
-    }
 
-    public static void stopBenchmark() {
-        shouldStop = true;
-        if (benchmarkThreads != null) {
-            // Wait for threads to finish current operations
-            for (final Thread t : benchmarkThreads) {
-                if (t != null && t.isAlive()) {
-                    try {
-                        t.join(1000); // Wait up to 1 second for thread to finish
-                    } catch (final InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-            }
-            benchmarkThreads = null;
+        try {
+            done.await();
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Benchmark interrupted before completion.");
         }
     }
 
-    public static void doRequest(final RheaKVStore rheaKVStore, final int writeRatio, final int readRatio,
-                                 final int valueSize, final int throttleSleepMs,
-                                 final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
-        final int regionSize = regionRouteTableOptionsList.size();
+    private static void putWorker(final RheaKVStore rheaKVStore, final int valueSize, final int throttleSleepMs,
+                                  final List<RegionRouteTableOptions> regionRouteTableOptionsList,
+                                  final AtomicInteger toIssue, final CountDownLatch done) {
         final ThreadLocalRandom random = ThreadLocalRandom.current();
-        final int sum = writeRatio + readRatio;
-        final Semaphore slidingWindow = new Semaphore(sum);
-        int index = 0;
-        int randomRegionIndex = 0;
-        final byte[] valeBytes = new byte[valueSize];
-        random.nextBytes(valeBytes);
-        while (!shouldStop) {
-            try {
-                if (throttleSleepMs > 0) {
-                    try {
-                        Thread.sleep(throttleSleepMs);
-                    } catch (final InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                }
+        final int regionSize = regionRouteTableOptionsList.size();
+        final byte[] valueBytes = new byte[valueSize];
+        random.nextBytes(valueBytes);
+
+        while (toIssue.getAndDecrement() > 0) {
+            if (throttleSleepMs > 0) {
                 try {
-                    slidingWindow.acquire();
-                } catch (final Exception e) {
-                    LOG.error("Wrong slidingWindow: {}, {}", slidingWindow.toString(), StackTraceUtil.stackTrace(e));
+                    Thread.sleep(throttleSleepMs);
+                } catch (final InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    done.countDown();
+                    return;
                 }
-                int i = index++;
-                if (i % sum == 0) {
-                    randomRegionIndex = random.nextInt(regionSize);
-                }
-                byte[] keyBytes = regionRouteTableOptionsList.get(randomRegionIndex).getStartKeyBytes();
-                if (keyBytes == null) {
-                    keyBytes = BYTES;
-                }
-                final Timer.Context ctx = timer.time();
-                if (Math.abs(i % sum) < writeRatio) {
-                    // put
-                    final Timer.Context putCtx = putTimer.time();
-                    final CompletableFuture<Boolean> f = put(rheaKVStore, keyBytes, valeBytes);
-                    f.whenComplete((ignored, throwable) -> {
-                        slidingWindow.release();
-                        ctx.stop();
-                        putCtx.stop();
-                    });
-                } else {
-                    // get
-                    final Timer.Context getCtx = getTimer.time();
-                    final CompletableFuture<byte[]> f = get(rheaKVStore, keyBytes);
-                    f.whenComplete((ignored, throwable) -> {
-                        slidingWindow.release();
-                        ctx.stop();
-                        getCtx.stop();
-                    });
-                }
+            }
+
+            byte[] keyBytes = regionRouteTableOptionsList.get(random.nextInt(regionSize)).getStartKeyBytes();
+            if (keyBytes == null) {
+                keyBytes = BytesUtil.writeUtf8(String.valueOf(random.nextLong()));
+            }
+
+            final Timer.Context ctx = putTimer.time();
+            try {
+                final CompletableFuture<Boolean> f = rheaKVStore.put(keyBytes, valueBytes);
+                f.whenComplete((ignored, throwable) -> {
+                    ctx.stop();
+                    if (throwable != null) {
+                        LOG.warn("Put failed: {}", throwable.getMessage());
+                    }
+                    done.countDown();
+                });
             } catch (final Throwable t) {
-                LOG.error("Error in doRequest: {}", StackTraceUtil.stackTrace(t));
+                ctx.stop();
+                LOG.error("Error issuing put: {}", StackTraceUtil.stackTrace(t));
+                done.countDown();
             }
         }
-    }
-
-    public static CompletableFuture<Boolean> put(final RheaKVStore rheaKVStore, final byte[] key, final byte[] value) {
-        return rheaKVStore.put(key, value);
-    }
-
-    public static CompletableFuture<byte[]> get(final RheaKVStore rheaKVStore, final byte[] key) {
-        return rheaKVStore.get(key);
     }
 
     // Because we use fake PD, so we need manual rebalance
