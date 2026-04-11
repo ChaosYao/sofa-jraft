@@ -123,6 +123,10 @@ import com.alipay.sofa.jraft.util.ThreadId;
 import com.alipay.sofa.jraft.util.Utils;
 import com.alipay.sofa.jraft.util.concurrent.LongHeldDetectingReadWriteLock;
 import com.alipay.sofa.jraft.util.timer.RaftTimerFactory;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Snapshot;
+import com.codahale.metrics.Timer;
 import com.google.protobuf.Message;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.EventFactory;
@@ -1260,32 +1264,64 @@ public class NodeImpl implements Node, RaftServerService {
 
     private void logLeaderResourceUsage() {
         try {
+            final StringBuilder sb = new StringBuilder();
+            final String nodeId = String.valueOf(getNodeId());
+            final String divider = "=".repeat(60);
+            sb.append('\n').append(divider).append('\n');
+            sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
+            sb.append(divider).append('\n');
+
+            // System CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
-            final long totalMemory = runtime.totalMemory();
-            final long freeMemory = runtime.freeMemory();
-            final long usedHeapMB = (totalMemory - freeMemory) / (1024 * 1024);
-            final long totalHeapMB = totalMemory / (1024 * 1024);
+            final long usedHeapMB = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
+            final long totalHeapMB = runtime.totalMemory() / (1024 * 1024);
             final long maxHeapMB = runtime.maxMemory() / (1024 * 1024);
 
             final OperatingSystemMXBean osMxBean = ManagementFactory.getOperatingSystemMXBean();
             if (osMxBean instanceof com.sun.management.OperatingSystemMXBean) {
                 final com.sun.management.OperatingSystemMXBean sunOs = (com.sun.management.OperatingSystemMXBean) osMxBean;
-                final String sysCpuLoad = String.format("%.2f", sunOs.getSystemCpuLoad() * 100);
-                final String procCpuLoad = String.format("%.2f", sunOs.getProcessCpuLoad() * 100);
                 final long totalPhysMemMB = sunOs.getTotalPhysicalMemorySize() / (1024 * 1024);
-                final long freePhysMemMB = sunOs.getFreePhysicalMemorySize() / (1024 * 1024);
-                final long usedPhysMemMB = totalPhysMemMB - freePhysMemMB;
-                LOG.info(
-                    "Node {} leader resource usage: sysCpu={}%, procCpu={}%, physMem={}/{} MB, jvmHeap={}/{}/{} MB (used/total/max).",
-                    getNodeId(), sysCpuLoad, procCpuLoad, usedPhysMemMB, totalPhysMemMB, usedHeapMB, totalHeapMB,
-                    maxHeapMB);
+                final long usedPhysMemMB = totalPhysMemMB - sunOs.getFreePhysicalMemorySize() / (1024 * 1024);
+                sb.append(String.format("  [CPU]     sysCpu=%-7s  procCpu=%s%n",
+                    String.format("%.2f%%", sunOs.getSystemCpuLoad() * 100),
+                    String.format("%.2f%%", sunOs.getProcessCpuLoad() * 100)));
+                sb.append(String.format("  [Memory]  physMem=%d/%d MB  jvmHeap=%d/%d/%d MB (used/total/max)%n",
+                    usedPhysMemMB, totalPhysMemMB, usedHeapMB, totalHeapMB, maxHeapMB));
             } else {
-                final String cpuLoad = String.format("%.2f", osMxBean.getSystemLoadAverage());
-                LOG.info("Node {} leader resource usage: sysLoadAvg={}, jvmHeap={}/{}/{} MB (used/total/max).",
-                    getNodeId(), cpuLoad, usedHeapMB, totalHeapMB, maxHeapMB);
+                sb.append(String.format("  [CPU]     sysLoadAvg=%.2f%n", osMxBean.getSystemLoadAverage()));
+                sb.append(String.format("  [Memory]  jvmHeap=%d/%d/%d MB (used/total/max)%n", usedHeapMB, totalHeapMB,
+                    maxHeapMB));
             }
+
+            // Pull log entry metrics
+            final MetricRegistry registry = this.metrics.getMetricRegistry();
+            if (registry != null) {
+                final Timer pullTimer = registry.getTimers().get("handle-pull-log-entry");
+                final Histogram pullCountHist = registry.getHistograms().get("handle-pull-log-entry-count");
+                final Histogram pullSizeHist = registry.getHistograms().get("handle-pull-log-entry-data-size");
+
+                if (pullTimer != null && pullTimer.getCount() > 0) {
+                    final Snapshot ts = pullTimer.getSnapshot();
+                    final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
+                    final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
+                    sb.append(String.format("  [Pull]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
+                        pullTimer.getCount(), p50Ms, p99Ms));
+                } else {
+                    sb.append("  [Pull]    requests=0\n");
+                }
+                if (pullCountHist != null && pullCountHist.getCount() > 0) {
+                    final Snapshot cs = pullCountHist.getSnapshot();
+                    final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
+                    sb.append(String.format("  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
+                        (long) cs.getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
+                        ss != null ? (long) ss.get99thPercentile() : 0L));
+                }
+            }
+
+            sb.append(divider);
+            LOG.info(sb.toString());
         } catch (final Exception e) {
-            LOG.warn("Node {} failed to log leader resource usage.", getNodeId(), e);
+            LOG.warn("Node {} failed to log leader dashboard.", getNodeId(), e);
         }
     }
 
@@ -2058,12 +2094,14 @@ public class NodeImpl implements Node, RaftServerService {
 
     @Override
     public Message handlePullLogEntryRequest(final PullLogEntryRequest request, final RpcRequestClosure done) {
-        //TODO 有必要吗
-        LOG.info(
+        LOG.debug(
             "[PULL-ENTRY] Node {} handling PullLogEntryRequest groupId={} from {} term={} prevLogIndex={} prevLogTerm={}",
             getNodeId(), request.getGroupId(), request.getServerId(), request.getTerm(), request.getPrevLogIndex(),
             request.getPrevLogTerm());
 
+        final long startMs = Utils.monotonicMs();
+        int entriesCount = 0;
+        int dataSize = 0;
         try {
             if (!this.state.isActive()) {
                 LOG.warn("[PULL-ENTRY] Node {} is not in active state, currTerm={}.", getNodeId(), this.currTerm);
@@ -2114,7 +2152,7 @@ public class NodeImpl implements Node, RaftServerService {
             final long nextIndex = prevLogIndex + 1;
             final long lastLogIndex = this.logManager.getLastLogIndex();
             if (nextIndex > lastLogIndex) {
-                LOG.info("[PULL-ENTRY] Node {} no more entries to send, groupId={} nextIndex={} lastLogIndex={}",
+                LOG.debug("[PULL-ENTRY] Node {} no more entries to send, groupId={} nextIndex={} lastLogIndex={}",
                     getNodeId(), request.getGroupId(), nextIndex, lastLogIndex);
                 return PullLogEntryResponse.newBuilder() //
                     .setTerm(this.currTerm) //
@@ -2176,9 +2214,11 @@ public class NodeImpl implements Node, RaftServerService {
                 currentIndex++;
             }
 
-            LOG.info(
+            entriesCount = entriesList.size();
+            dataSize = totalDataSize;
+            LOG.debug(
                 "[PULL-ENTRY] Node {} preparing response with entries, groupId={} entriesCount={} fromIndex={} toIndex={}",
-                getNodeId(), request.getGroupId(), entriesList.size(), nextIndex, currentIndex - 1);
+                getNodeId(), request.getGroupId(), entriesCount, nextIndex, currentIndex - 1);
 
             final PullLogEntryResponse.Builder responseBuilder = PullLogEntryResponse.newBuilder() //
                 .setTerm(this.currTerm) //
@@ -2215,6 +2255,10 @@ public class NodeImpl implements Node, RaftServerService {
             LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}", getNodeId(),
                 request.getGroupId(), e);
             return null;
+        } finally {
+            this.metrics.recordLatency("handle-pull-log-entry", Utils.monotonicMs() - startMs);
+            this.metrics.recordSize("handle-pull-log-entry-count", entriesCount);
+            this.metrics.recordSize("handle-pull-log-entry-data-size", dataSize);
         }
     }
 

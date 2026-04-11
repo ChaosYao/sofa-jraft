@@ -1595,7 +1595,7 @@ public class Replicator implements ThreadId.OnError {
             if (!redundantNotify) {
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
-                LOG.info("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
+                LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
                     this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
 
                 this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
