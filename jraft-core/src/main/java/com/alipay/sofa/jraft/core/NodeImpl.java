@@ -16,6 +16,8 @@
  */
 package com.alipay.sofa.jraft.core;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.nio.ByteBuffer;
@@ -216,6 +218,11 @@ public class NodeImpl implements Node, RaftServerService {
     private RepeatedTimer                                                  snapshotTimer;
     private ScheduledFuture<?>                                             transferTimer;
     private ScheduledFuture<?>                                             leaderResourceLogTask;
+    // Snapshot of prev network/disk counters for delta calculation in leader dashboard
+    private long                                                           prevNetRxBytes           = -1;
+    private long                                                           prevNetTxBytes           = -1;
+    private long                                                           prevDiskReadSectors      = -1;
+    private long                                                           prevDiskWriteSectors     = -1;
     private ThreadId                                                       wakingCandidate;
     /** Disruptor to run node service */
     private Disruptor<LogEntryAndClosure>                                  applyDisruptor;
@@ -1271,7 +1278,7 @@ public class NodeImpl implements Node, RaftServerService {
             sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
             sb.append(divider).append('\n');
 
-            // System CPU & Memory
+            // CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
             final long usedHeapMB = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
             final long totalHeapMB = runtime.totalMemory() / (1024 * 1024);
@@ -1291,6 +1298,36 @@ public class NodeImpl implements Node, RaftServerService {
                 sb.append(String.format("  [CPU]     sysLoadAvg=%.2f%n", osMxBean.getSystemLoadAverage()));
                 sb.append(String.format("  [Memory]  jvmHeap=%d/%d/%d MB (used/total/max)%n", usedHeapMB, totalHeapMB,
                     maxHeapMB));
+            }
+
+            // Network bandwidth (Linux only, /proc/net/dev)
+            final long[] netStats = readNetStats();
+            if (netStats[0] >= 0 && this.prevNetRxBytes >= 0) {
+                final long rxKBps = (netStats[0] - this.prevNetRxBytes) / 1024 / 60;
+                final long txKBps = (netStats[1] - this.prevNetTxBytes) / 1024 / 60;
+                sb.append(String.format("  [Network] rx=%-8s  tx=%s%n", formatBandwidth(rxKBps),
+                    formatBandwidth(txKBps)));
+            } else if (netStats[0] >= 0) {
+                sb.append("  [Network] rx=N/A (first sample)\n");
+            }
+            if (netStats[0] >= 0) {
+                this.prevNetRxBytes = netStats[0];
+                this.prevNetTxBytes = netStats[1];
+            }
+
+            // Disk IO (Linux only, /proc/diskstats)
+            final long[] diskStats = readDiskStats();
+            if (diskStats[0] >= 0 && this.prevDiskReadSectors >= 0) {
+                final long readKBps = (diskStats[0] - this.prevDiskReadSectors) * 512 / 1024 / 60;
+                final long writeKBps = (diskStats[1] - this.prevDiskWriteSectors) * 512 / 1024 / 60;
+                sb.append(String.format("  [Disk IO] read=%-8s  write=%s%n", formatBandwidth(readKBps),
+                    formatBandwidth(writeKBps)));
+            } else if (diskStats[0] >= 0) {
+                sb.append("  [Disk IO] read=N/A (first sample)\n");
+            }
+            if (diskStats[0] >= 0) {
+                this.prevDiskReadSectors = diskStats[0];
+                this.prevDiskWriteSectors = diskStats[1];
             }
 
             // Pull log entry metrics
@@ -1325,6 +1362,79 @@ public class NodeImpl implements Node, RaftServerService {
         }
     }
 
+    /** Read total rx/tx bytes across all non-loopback interfaces from /proc/net/dev.
+     *  Returns {rxBytes, txBytes}, or {-1, -1} if unavailable. */
+    private static long[] readNetStats() {
+        final long[] result = { -1L, -1L };
+        try (final BufferedReader br = new BufferedReader(new FileReader("/proc/net/dev"))) {
+            String line;
+            long rxTotal = 0, txTotal = 0;
+            boolean found = false;
+            while ((line = br.readLine()) != null) {
+                final int colon = line.indexOf(':');
+                if (colon < 0) {
+                    continue;
+                }
+                final String iface = line.substring(0, colon).trim();
+                if ("lo".equals(iface)) {
+                    continue;
+                }
+                final String[] parts = line.substring(colon + 1).trim().split("\\s+");
+                if (parts.length >= 9) {
+                    rxTotal += Long.parseLong(parts[0]);
+                    txTotal += Long.parseLong(parts[8]);
+                    found = true;
+                }
+            }
+            if (found) {
+                result[0] = rxTotal;
+                result[1] = txTotal;
+            }
+        } catch (final Exception ignored) {
+            // non-Linux or permission issue — return {-1, -1}
+        }
+        return result;
+    }
+
+    /** Read total read/write sectors across physical disks from /proc/diskstats.
+     *  Returns {readSectors, writeSectors}, or {-1, -1} if unavailable. */
+    private static long[] readDiskStats() {
+        final long[] result = { -1L, -1L };
+        try (final BufferedReader br = new BufferedReader(new FileReader("/proc/diskstats"))) {
+            String line;
+            long readTotal = 0, writeTotal = 0;
+            boolean found = false;
+            while ((line = br.readLine()) != null) {
+                final String[] parts = line.trim().split("\\s+");
+                if (parts.length < 10) {
+                    continue;
+                }
+                final String dev = parts[2];
+                // Only count whole disks: sd*, vd*, nvme*n*, xvd* — skip partitions and loop/dm devices
+                if (!dev.matches("sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\\d+n\\d+")) {
+                    continue;
+                }
+                readTotal += Long.parseLong(parts[5]);
+                writeTotal += Long.parseLong(parts[9]);
+                found = true;
+            }
+            if (found) {
+                result[0] = readTotal;
+                result[1] = writeTotal;
+            }
+        } catch (final Exception ignored) {
+            // non-Linux or permission issue — return {-1, -1}
+        }
+        return result;
+    }
+
+    private static String formatBandwidth(final long kbps) {
+        if (kbps >= 1024) {
+            return String.format("%.1f MB/s", kbps / 1024.0);
+        }
+        return kbps + " KB/s";
+    }
+
     // should be in writeLock
     private void stepDown(final long term, final boolean wakeupCandidate, final Status status) {
         LOG.debug("Node {} stepDown, term={}, newTerm={}, wakeupCandidate={}.", getNodeId(), this.currTerm, term,
@@ -1344,6 +1454,10 @@ public class NodeImpl implements Node, RaftServerService {
                     this.leaderResourceLogTask.cancel(false);
                     this.leaderResourceLogTask = null;
                 }
+                this.prevNetRxBytes = -1;
+                this.prevNetTxBytes = -1;
+                this.prevDiskReadSectors = -1;
+                this.prevDiskWriteSectors = -1;
             }
         }
         // reset leader_id
