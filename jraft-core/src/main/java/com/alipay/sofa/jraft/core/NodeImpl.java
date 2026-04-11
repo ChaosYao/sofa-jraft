@@ -16,6 +16,8 @@
  */
 package com.alipay.sofa.jraft.core;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -209,6 +211,7 @@ public class NodeImpl implements Node, RaftServerService {
     private RepeatedTimer                                                  stepDownTimer;
     private RepeatedTimer                                                  snapshotTimer;
     private ScheduledFuture<?>                                             transferTimer;
+    private ScheduledFuture<?>                                             leaderResourceLogTask;
     private ThreadId                                                       wakingCandidate;
     /** Disruptor to run node service */
     private Disruptor<LogEntryAndClosure>                                  applyDisruptor;
@@ -1251,6 +1254,39 @@ public class NodeImpl implements Node, RaftServerService {
         }
         this.confCtx.flush(this.conf.getConf(), this.conf.getOldConf());
         this.stepDownTimer.start();
+        this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 60,
+            TimeUnit.SECONDS);
+    }
+
+    private void logLeaderResourceUsage() {
+        try {
+            final Runtime runtime = Runtime.getRuntime();
+            final long totalMemory = runtime.totalMemory();
+            final long freeMemory = runtime.freeMemory();
+            final long usedHeapMB = (totalMemory - freeMemory) / (1024 * 1024);
+            final long totalHeapMB = totalMemory / (1024 * 1024);
+            final long maxHeapMB = runtime.maxMemory() / (1024 * 1024);
+
+            final OperatingSystemMXBean osMxBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osMxBean instanceof com.sun.management.OperatingSystemMXBean) {
+                final com.sun.management.OperatingSystemMXBean sunOs = (com.sun.management.OperatingSystemMXBean) osMxBean;
+                final String sysCpuLoad = String.format("%.2f", sunOs.getSystemCpuLoad() * 100);
+                final String procCpuLoad = String.format("%.2f", sunOs.getProcessCpuLoad() * 100);
+                final long totalPhysMemMB = sunOs.getTotalPhysicalMemorySize() / (1024 * 1024);
+                final long freePhysMemMB = sunOs.getFreePhysicalMemorySize() / (1024 * 1024);
+                final long usedPhysMemMB = totalPhysMemMB - freePhysMemMB;
+                LOG.info(
+                    "Node {} leader resource usage: sysCpu={}%, procCpu={}%, physMem={}/{} MB, jvmHeap={}/{}/{} MB (used/total/max).",
+                    getNodeId(), sysCpuLoad, procCpuLoad, usedPhysMemMB, totalPhysMemMB, usedHeapMB, totalHeapMB,
+                    maxHeapMB);
+            } else {
+                final String cpuLoad = String.format("%.2f", osMxBean.getSystemLoadAverage());
+                LOG.info("Node {} leader resource usage: sysLoadAvg={}, jvmHeap={}/{}/{} MB (used/total/max).",
+                    getNodeId(), cpuLoad, usedHeapMB, totalHeapMB, maxHeapMB);
+            }
+        } catch (final Exception e) {
+            LOG.warn("Node {} failed to log leader resource usage.", getNodeId(), e);
+        }
     }
 
     // should be in writeLock
@@ -1268,6 +1304,10 @@ public class NodeImpl implements Node, RaftServerService {
             // signal fsm leader stop immediately
             if (this.state == State.STATE_LEADER) {
                 onLeaderStop(status);
+                if (this.leaderResourceLogTask != null) {
+                    this.leaderResourceLogTask.cancel(false);
+                    this.leaderResourceLogTask = null;
+                }
             }
         }
         // reset leader_id
