@@ -1,8 +1,4 @@
 ##RheaKVStoreOptions
-## putCount (number of put operations before client exits) is controlled via:
-##   CLI arg [5]:         java BenchmarkClient <configPath> <threads> <valueSize> [throttleSleepMs] [putCount]
-##   System property:     -DputCount=300
-##   Default value:       300
 ---
 clusterName: rhea_benchmark
 
