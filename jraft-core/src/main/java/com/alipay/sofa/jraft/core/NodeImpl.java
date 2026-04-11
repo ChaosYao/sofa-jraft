@@ -1302,13 +1302,15 @@ public class NodeImpl implements Node, RaftServerService {
 
             // Network bandwidth (Linux only, /proc/net/dev)
             final long[] netStats = readNetStats();
-            if (netStats[0] >= 0 && this.prevNetRxBytes >= 0) {
+            if (netStats[0] < 0) {
+                sb.append("  [Network] N/A (non-Linux or /proc/net/dev unreadable)\n");
+            } else if (this.prevNetRxBytes < 0) {
+                sb.append("  [Network] rx=N/A (first sample, will show next cycle)\n");
+            } else {
                 final long rxKBps = (netStats[0] - this.prevNetRxBytes) / 1024 / 60;
                 final long txKBps = (netStats[1] - this.prevNetTxBytes) / 1024 / 60;
                 sb.append(String.format("  [Network] rx=%-8s  tx=%s%n", formatBandwidth(rxKBps),
                     formatBandwidth(txKBps)));
-            } else if (netStats[0] >= 0) {
-                sb.append("  [Network] rx=N/A (first sample)\n");
             }
             if (netStats[0] >= 0) {
                 this.prevNetRxBytes = netStats[0];
@@ -1317,13 +1319,15 @@ public class NodeImpl implements Node, RaftServerService {
 
             // Disk IO (Linux only, /proc/diskstats)
             final long[] diskStats = readDiskStats();
-            if (diskStats[0] >= 0 && this.prevDiskReadSectors >= 0) {
+            if (diskStats[0] < 0) {
+                sb.append("  [Disk IO] N/A (non-Linux or /proc/diskstats unreadable)\n");
+            } else if (this.prevDiskReadSectors < 0) {
+                sb.append("  [Disk IO] read=N/A (first sample, will show next cycle)\n");
+            } else {
                 final long readKBps = (diskStats[0] - this.prevDiskReadSectors) * 512 / 1024 / 60;
                 final long writeKBps = (diskStats[1] - this.prevDiskWriteSectors) * 512 / 1024 / 60;
                 sb.append(String.format("  [Disk IO] read=%-8s  write=%s%n", formatBandwidth(readKBps),
                     formatBandwidth(writeKBps)));
-            } else if (diskStats[0] >= 0) {
-                sb.append("  [Disk IO] read=N/A (first sample)\n");
             }
             if (diskStats[0] >= 0) {
                 this.prevDiskReadSectors = diskStats[0];
@@ -1332,7 +1336,9 @@ public class NodeImpl implements Node, RaftServerService {
 
             // Pull log entry metrics
             final MetricRegistry registry = this.metrics.getMetricRegistry();
-            if (registry != null) {
+            if (registry == null) {
+                sb.append("  [Pull]    N/A (enableMetrics=false, set NodeOptions.enableMetrics=true)\n");
+            } else {
                 final Timer pullTimer = registry.getTimers().get("handle-pull-log-entry");
                 final Histogram pullCountHist = registry.getHistograms().get("handle-pull-log-entry-count");
                 final Histogram pullSizeHist = registry.getHistograms().get("handle-pull-log-entry-data-size");
@@ -1344,7 +1350,7 @@ public class NodeImpl implements Node, RaftServerService {
                     sb.append(String.format("  [Pull]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
                         pullTimer.getCount(), p50Ms, p99Ms));
                 } else {
-                    sb.append("  [Pull]    requests=0\n");
+                    sb.append("  [Pull]    requests=0 (no pull requests yet, or enableReplicatorNotify=false)\n");
                 }
                 if (pullCountHist != null && pullCountHist.getCount() > 0) {
                     final Snapshot cs = pullCountHist.getSnapshot();
@@ -1390,8 +1396,8 @@ public class NodeImpl implements Node, RaftServerService {
                 result[0] = rxTotal;
                 result[1] = txTotal;
             }
-        } catch (final Exception ignored) {
-            // non-Linux or permission issue — return {-1, -1}
+        } catch (final Exception e) {
+            LOG.warn("Failed to read /proc/net/dev: {}", e.getMessage());
         }
         return result;
     }
@@ -1421,9 +1427,11 @@ public class NodeImpl implements Node, RaftServerService {
             if (found) {
                 result[0] = readTotal;
                 result[1] = writeTotal;
+            } else {
+                LOG.warn("No matching disk devices found in /proc/diskstats (expected sd*/vd*/nvme*/xvd*)");
             }
-        } catch (final Exception ignored) {
-            // non-Linux or permission issue — return {-1, -1}
+        } catch (final Exception e) {
+            LOG.warn("Failed to read /proc/diskstats: {}", e.getMessage());
         }
         return result;
     }
