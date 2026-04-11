@@ -1273,7 +1273,7 @@ public class NodeImpl implements Node, RaftServerService {
         try {
             final StringBuilder sb = new StringBuilder();
             final String nodeId = String.valueOf(getNodeId());
-            final String divider = "=".repeat(60);
+            final String divider = "============================================================";
             sb.append('\n').append(divider).append('\n');
             sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
             sb.append(divider).append('\n');
