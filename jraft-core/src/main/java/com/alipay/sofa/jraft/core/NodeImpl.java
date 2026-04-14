@@ -1278,6 +1278,11 @@ public class NodeImpl implements Node, RaftServerService {
             sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
             sb.append(divider).append('\n');
 
+            // Raft state
+            final long lastLogIndex = this.logManager.getLastLogIndex();
+            final long committedIndex = this.ballotBox.getLastCommittedIndex();
+            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitIndex=%d%n", lastLogIndex, committedIndex));
+
             // CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
             final long usedHeapMB = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
