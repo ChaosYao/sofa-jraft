@@ -1334,30 +1334,59 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevDiskWriteSectors = diskStats[1];
             }
 
-            // Pull log entry metrics
+            // Replication metrics (auto-detect push vs pull mode)
             final MetricRegistry registry = this.metrics.getMetricRegistry();
             if (registry == null) {
-                sb.append("  [Pull]    N/A (enableMetrics=false, set NodeOptions.enableMetrics=true)\n");
+                sb.append("  [Repl]    N/A (enableMetrics=false, set NodeOptions.enableMetrics=true)\n");
             } else {
+                // Pull mode metrics
                 final Timer pullTimer = registry.getTimers().get("handle-pull-log-entry");
                 final Histogram pullCountHist = registry.getHistograms().get("handle-pull-log-entry-count");
                 final Histogram pullSizeHist = registry.getHistograms().get("handle-pull-log-entry-data-size");
 
+                // Push mode metrics
+                final Timer pushTimer = registry.getTimers().get("replicate-entries");
+                final Histogram pushCountHist = registry.getHistograms().get("replicate-entries-count");
+                final Histogram pushSizeHist = registry.getHistograms().get("replicate-entries-bytes");
+
+                // Show pull metrics if available
                 if (pullTimer != null && pullTimer.getCount() > 0) {
                     final Snapshot ts = pullTimer.getSnapshot();
                     final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
                     final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
                     sb.append(String.format("  [Pull]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
                         pullTimer.getCount(), p50Ms, p99Ms));
-                } else {
-                    sb.append("  [Pull]    requests=0 (no pull requests yet, or enableReplicatorNotify=false)\n");
+                    if (pullCountHist != null && pullCountHist.getCount() > 0) {
+                        final Snapshot cs = pullCountHist.getSnapshot();
+                        final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
+                        sb.append(String.format("  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
+                            (long) cs.getMedian(), (long) cs.get99thPercentile(),
+                            ss != null ? (long) ss.getMedian() : 0L,
+                            ss != null ? (long) ss.get99thPercentile() : 0L));
+                    }
                 }
-                if (pullCountHist != null && pullCountHist.getCount() > 0) {
-                    final Snapshot cs = pullCountHist.getSnapshot();
-                    final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
-                    sb.append(String.format("  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
-                        (long) cs.getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
-                        ss != null ? (long) ss.get99thPercentile() : 0L));
+
+                // Show push metrics if available
+                if (pushTimer != null && pushTimer.getCount() > 0) {
+                    final Snapshot ts = pushTimer.getSnapshot();
+                    final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
+                    final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
+                    sb.append(String.format("  [Push]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
+                        pushTimer.getCount(), p50Ms, p99Ms));
+                    if (pushCountHist != null && pushCountHist.getCount() > 0) {
+                        final Snapshot cs = pushCountHist.getSnapshot();
+                        final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
+                        sb.append(String.format("  [Push]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
+                            (long) cs.getMedian(), (long) cs.get99thPercentile(),
+                            ss != null ? (long) ss.getMedian() : 0L,
+                            ss != null ? (long) ss.get99thPercentile() : 0L));
+                    }
+                }
+
+                // Neither mode has data yet
+                if ((pullTimer == null || pullTimer.getCount() == 0)
+                    && (pushTimer == null || pushTimer.getCount() == 0)) {
+                    sb.append("  [Repl]    requests=0 (no replication activity yet)\n");
                 }
             }
 
