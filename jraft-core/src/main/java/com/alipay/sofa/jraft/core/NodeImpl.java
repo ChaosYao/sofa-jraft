@@ -1359,9 +1359,9 @@ public class NodeImpl implements Node, RaftServerService {
                     if (pullCountHist != null && pullCountHist.getCount() > 0) {
                         final Snapshot cs = pullCountHist.getSnapshot();
                         final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
-                        sb.append(String.format("  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
-                            (long) cs.getMedian(), (long) cs.get99thPercentile(),
-                            ss != null ? (long) ss.getMedian() : 0L,
+                        sb.append(String.format(
+                            "  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n", (long) cs
+                                .getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
                             ss != null ? (long) ss.get99thPercentile() : 0L));
                     }
                 }
@@ -1376,9 +1376,9 @@ public class NodeImpl implements Node, RaftServerService {
                     if (pushCountHist != null && pushCountHist.getCount() > 0) {
                         final Snapshot cs = pushCountHist.getSnapshot();
                         final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
-                        sb.append(String.format("  [Push]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
-                            (long) cs.getMedian(), (long) cs.get99thPercentile(),
-                            ss != null ? (long) ss.getMedian() : 0L,
+                        sb.append(String.format(
+                            "  [Push]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n", (long) cs
+                                .getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
                             ss != null ? (long) ss.get99thPercentile() : 0L));
                     }
                 }
@@ -2399,6 +2399,9 @@ public class NodeImpl implements Node, RaftServerService {
                     final long newNextIndex = prevLogIndex + 1 + entriesList.size();
                     Replicator.updateNextIndex(replicatorId, newNextIndex);
                 }
+                if (!entriesList.isEmpty()) {
+                    triggerFollowersCommitCheckAsync(request.getGroupId(), nextIndex, currentIndex - 1);
+                }
             }
 
             return response;
@@ -2411,6 +2414,72 @@ public class NodeImpl implements Node, RaftServerService {
             this.metrics.recordSize("handle-pull-log-entry-count", entriesCount);
             this.metrics.recordSize("handle-pull-log-entry-data-size", dataSize);
         }
+    }
+
+    private void triggerFollowersCommitCheckAsync(final String groupId, final long expectedFirstLogIndex,
+                                                  final long expectedLastLogIndex) {
+        if (expectedFirstLogIndex <= 0 || expectedLastLogIndex < expectedFirstLogIndex) {
+            return;
+        }
+        Utils.runInThread(() -> {
+            final long prevLogTerm = this.logManager.getTerm(expectedLastLogIndex);
+            if (prevLogTerm == 0 && expectedLastLogIndex != 0) {
+                LOG.warn("[PULL-ENTRY] Node {} cannot query followers for pull commit range [{}, {}], missing term.",
+                    getNodeId(), expectedFirstLogIndex, expectedLastLogIndex);
+                return;
+            }
+            final List<PeerId> followers = new ArrayList<>(this.conf.getConf().getPeers());
+            followers.remove(this.serverId);
+            for (final PeerId followerId : followers) {
+                triggerFollowerCommitCheckByHeartbeat(followerId, groupId, expectedFirstLogIndex, expectedLastLogIndex,
+                    prevLogTerm);
+            }
+        });
+    }
+
+    private void triggerFollowerCommitCheckByHeartbeat(final PeerId followerId, final String groupId,
+                                                       final long expectedFirstLogIndex,
+                                                       final long expectedLastLogIndex, final long prevLogTerm) {
+        final AppendEntriesRequest request = AppendEntriesRequest.newBuilder() //
+            .setGroupId(groupId) //
+            .setServerId(this.serverId.toString()) //
+            .setPeerId(followerId.toString()) //
+            .setTerm(this.currTerm) //
+            .setPrevLogIndex(expectedLastLogIndex) //
+            .setPrevLogTerm(prevLogTerm) //
+            .setCommittedIndex(this.ballotBox.getLastCommittedIndex()) //
+            .build();
+
+        this.rpcService.appendEntries(followerId.getEndpoint(), request, this.options.getElectionTimeoutMs(),
+            new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+
+                @Override
+                public void run(final Status status) {
+                    if (!status.isOk()) {
+                        LOG.warn("[PULL-ENTRY] Node {} failed to query follower {} by heartbeat: {}.", getNodeId(),
+                            followerId, status);
+                        return;
+                    }
+                    final AppendEntriesResponse response = getResponse();
+                    if (response == null) {
+                        LOG.warn("[PULL-ENTRY] Node {} got null heartbeat response from {}.", getNodeId(), followerId);
+                        return;
+                    }
+                    if (response.getTerm() > NodeImpl.this.currTerm) {
+                        increaseTermTo(response.getTerm(), new Status(RaftError.EHIGHERTERMRESPONSE,
+                            "Leader receives higher term append_entries_response from peer:%s", followerId));
+                        return;
+                    }
+                    final long followerLastLogIndex = response.hasLastLogIndex() ? response.getLastLogIndex() : 0L;
+                    final long commitLastLogIndex = Math.min(expectedLastLogIndex, followerLastLogIndex);
+                    if (commitLastLogIndex >= expectedFirstLogIndex) {
+                        ballotBox.commitAt(expectedFirstLogIndex, commitLastLogIndex, followerId);
+                        LOG.info(
+                            "[PULL-ENTRY] Node {} queried follower {} by heartbeat, lastLogIndex={}, committed pull range [{}, {}].",
+                            getNodeId(), followerId, followerLastLogIndex, expectedFirstLogIndex, commitLastLogIndex);
+                    }
+                }
+            });
     }
 
     private LogEntry logEntryFromMeta(final long index, final ByteBuffer allData, final RaftOutter.EntryMeta entry) {
