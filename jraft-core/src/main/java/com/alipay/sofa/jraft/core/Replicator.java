@@ -1720,8 +1720,8 @@ public class Replicator implements ThreadId.OnError {
         }
 
         final AppendEntriesRequest request = rb.build();
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
+        if (LOG.isInfoEnabled()) {
+            LOG.info(
                 "Node {} send AppendEntriesRequest to {} term {} lastCommittedIndex {} prevLogIndex {} prevLogTerm {} logIndex {} count {}",
                 this.options.getNode().getNodeId(), this.options.getPeerId(), this.options.getTerm(),
                 request.getCommittedIndex(), request.getPrevLogIndex(), request.getPrevLogTerm(), nextSendingIndex,
