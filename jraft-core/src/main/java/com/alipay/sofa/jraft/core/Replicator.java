@@ -96,6 +96,10 @@ public class Replicator implements ThreadId.OnError {
     /** Last notify RPC content; skip send when leader {@code hintIndex} and term are unchanged. */
     private long                             lastNotifyHintIndex    = -1;
     private long                             lastNotifyTerm         = -1;
+    /** Timestamp of last notify RPC sent; used to throttle notify frequency. */
+    private long                             lastNotifySendTimeMs   = 0;
+    /** Minimum interval between notify RPCs in milliseconds. */
+    private static final long                NOTIFY_MIN_INTERVAL_MS = 10;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -1397,12 +1401,20 @@ public class Replicator implements ThreadId.OnError {
             r.sendEmptyEntries(false);
             return false;
         }
-        // record metrics
+        // record metrics (only count DATA entries, exclude no-op / configuration)
         if (request.getEntriesCount() > 0) {
-            r.nodeMetrics.recordLatency("replicate-entries", Utils.monotonicMs() - rpcSendTime);
-            r.nodeMetrics.recordSize("replicate-entries-count", request.getEntriesCount());
-            r.nodeMetrics.recordSize("replicate-entries-bytes", request.getData() != null ? request.getData().size()
-                : 0);
+            int dataEntryCount = 0;
+            for (final RaftOutter.EntryMeta entry : request.getEntriesList()) {
+                if (entry.getType() == EnumOutter.EntryType.ENTRY_TYPE_DATA) {
+                    dataEntryCount++;
+                }
+            }
+            if (dataEntryCount > 0) {
+                r.nodeMetrics.recordLatency("replicate-entries", Utils.monotonicMs() - rpcSendTime);
+                r.nodeMetrics.recordSize("replicate-entries-count", dataEntryCount);
+                r.nodeMetrics.recordSize("replicate-entries-bytes",
+                    request.getData() != null ? request.getData().size() : 0);
+            }
         }
 
         final boolean isLogDebugEnabled = LOG.isDebugEnabled();
@@ -1592,9 +1604,18 @@ public class Replicator implements ThreadId.OnError {
             final long term = request.getTerm();
             final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
 
-            if (!redundantNotify) {
+            // Throttle notify frequency to prevent busy loop:
+            // When benchmark client writes continuously, waitMoreEntries callback fires
+            // immediately after each notify (new entries always available), causing a
+            // tight loop of notify -> wait -> callback -> notify without any backpressure
+            // (unlike push mode where sendEntries blocks until RPC response).
+            final long nowMs = Utils.monotonicMs();
+            final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
+
+            if (!redundantNotify && !tooFrequent) {
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
+                this.lastNotifySendTimeMs = nowMs;
                 LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
                     this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
 

@@ -1354,8 +1354,8 @@ public class NodeImpl implements Node, RaftServerService {
                     final Snapshot ts = pullTimer.getSnapshot();
                     final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
                     final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
-                    sb.append(String.format("  [Pull]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
-                        pullTimer.getCount(), p50Ms, p99Ms));
+                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s  latency(p50/p99)=%dms/%dms%n",
+                        pullTimer.getCount(), pullTimer.getOneMinuteRate(), p50Ms, p99Ms));
                     if (pullCountHist != null && pullCountHist.getCount() > 0) {
                         final Snapshot cs = pullCountHist.getSnapshot();
                         final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
@@ -1371,8 +1371,8 @@ public class NodeImpl implements Node, RaftServerService {
                     final Snapshot ts = pushTimer.getSnapshot();
                     final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
                     final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
-                    sb.append(String.format("  [Push]    requests=%-6d  latency(p50/p99)=%dms/%dms%n",
-                        pushTimer.getCount(), p50Ms, p99Ms));
+                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s  latency(p50/p99)=%dms/%dms%n",
+                        pushTimer.getCount(), pushTimer.getOneMinuteRate(), p50Ms, p99Ms));
                     if (pushCountHist != null && pushCountHist.getCount() > 0) {
                         final Snapshot cs = pushCountHist.getSnapshot();
                         final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
