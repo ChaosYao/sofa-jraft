@@ -212,6 +212,7 @@ public class BenchmarkClient {
                     if (seq >= totalRequests) {
                         slidingWindow.release();
                         ctx.stop();
+                        shouldStop = true;
                         break;
                     }
                     final Timer.Context putCtx = putTimer.time();
