@@ -22,10 +22,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,9 +61,11 @@ public class BenchmarkClient {
     private static final Timer  getTimer = KVMetrics.timer("get_benchmark_timer");
     private static final Timer  timer    = KVMetrics.timer("benchmark_timer");
 
+    private static final int DEFAULT_TOTAL_REQUESTS = 3000;
+
     public static void main(final String[] args) {
         if (args.length < 6) {
-            LOG.error("Args: [configPath], [threads], [writeRatio], [readRatio], [valueSize], [throttleSleepMs](optional) are needed.");
+            LOG.error("Args: [configPath], [threads], [writeRatio], [readRatio], [valueSize], [totalRequests](optional, default=3000), [throttleSleepMs](optional) are needed.");
             System.exit(-1);
         }
         final String configPath = args[1];
@@ -69,7 +73,8 @@ public class BenchmarkClient {
         final int writeRatio = Integer.parseInt(args[3]);
         final int readRatio = Integer.parseInt(args[4]);
         final int valueSize = Integer.parseInt(args[5]);
-        final int throttleSleepMs = args.length >= 7 ? Integer.parseInt(args[6]) : 0;
+        final int totalRequests = args.length >= 7 ? Integer.parseInt(args[6]) : DEFAULT_TOTAL_REQUESTS;
+        final int throttleSleepMs = args.length >= 8 ? Integer.parseInt(args[7]) : 0;
 
         final RheaKVStoreOptions opts = Yaml.readConfig(configPath);
 
@@ -100,38 +105,30 @@ public class BenchmarkClient {
             .build() //
             .start(30, TimeUnit.SECONDS);
 
-        LOG.info("Start benchmark with 2-minute intervals...");
-        // Run benchmark in a loop, repeating every 2 minutes
-        while (true) {
-            LOG.info("Starting new benchmark cycle...");
-            startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, throttleSleepMs,
-                regionRouteTableOptionsList);
+        LOG.info("Starting benchmark: totalPuts={}, threads={}, writeRatio={}, readRatio={}, valueSize={}",
+            totalRequests, threads, writeRatio, readRatio, valueSize);
 
-            // Run benchmark for 2 minutes
-            try {
-                Thread.sleep(2 * 60 * 1000); // 2 minutes
-            } catch (final InterruptedException e) {
-                LOG.warn("Benchmark interrupted, exiting...");
-                Thread.currentThread().interrupt();
-                break;
-            }
+        final AtomicInteger sentCount = new AtomicInteger(0);
+        final CountDownLatch completionLatch = new CountDownLatch(totalRequests);
 
-            // Stop current benchmark threads
-            LOG.info("Stopping current benchmark cycle...");
-            stopBenchmark();
+        final long startTime = System.currentTimeMillis();
+        startBenchmark(rheaKVStore, threads, writeRatio, readRatio, valueSize, throttleSleepMs,
+            regionRouteTableOptionsList, totalRequests, sentCount, completionLatch);
 
-            // Wait for 2 minutes before next cycle
-            LOG.info("Waiting 2 minutes before next cycle...");
-            try {
-                Thread.sleep(2 * 60 * 1000); // 2 minutes
-            } catch (final InterruptedException e) {
-                LOG.warn("Benchmark interrupted, exiting...");
-                Thread.currentThread().interrupt();
-                break;
-            }
+        try {
+            completionLatch.await();
+        } catch (final InterruptedException e) {
+            LOG.warn("Benchmark interrupted while waiting for completion.");
+            Thread.currentThread().interrupt();
         }
 
-        // Cleanup
+        final long elapsedMs = System.currentTimeMillis() - startTime;
+        final double elapsedSec = elapsedMs / 1000.0;
+        final double throughput = totalRequests / elapsedSec;
+        LOG.info("Benchmark completed: totalPuts={}, elapsedTime={}ms ({} s), throughput={} puts/s",
+            totalRequests, elapsedMs, String.format("%.2f", elapsedSec), String.format("%.2f", throughput));
+
+        stopBenchmark();
         rheaKVStore.shutdown();
     }
 
@@ -140,14 +137,16 @@ public class BenchmarkClient {
 
     public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int writeRatio,
                                       final int readRatio, final int valueSize, final int throttleSleepMs,
-                                      final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
+                                      final List<RegionRouteTableOptions> regionRouteTableOptionsList,
+                                      final int totalRequests, final AtomicInteger sentCount,
+                                      final CountDownLatch completionLatch) {
         shouldStop = false;
         benchmarkThreads = new Thread[threads];
         for (int i = 0; i < threads; i++) {
             final Thread t = new Thread(
                 () -> doRequest(rheaKVStore, writeRatio, readRatio, valueSize, throttleSleepMs,
-                    regionRouteTableOptionsList));
-            t.setDaemon(false); // Changed to non-daemon so they don't exit when main thread sleeps
+                    regionRouteTableOptionsList, totalRequests, sentCount, completionLatch));
+            t.setDaemon(false);
             benchmarkThreads[i] = t;
             t.start();
         }
@@ -172,7 +171,9 @@ public class BenchmarkClient {
 
     public static void doRequest(final RheaKVStore rheaKVStore, final int writeRatio, final int readRatio,
                                  final int valueSize, final int throttleSleepMs,
-                                 final List<RegionRouteTableOptions> regionRouteTableOptionsList) {
+                                 final List<RegionRouteTableOptions> regionRouteTableOptionsList,
+                                 final int totalRequests, final AtomicInteger sentCount,
+                                 final CountDownLatch completionLatch) {
         final int regionSize = regionRouteTableOptionsList.size();
         final ThreadLocalRandom random = ThreadLocalRandom.current();
         final int sum = writeRatio + readRatio;
@@ -206,16 +207,23 @@ public class BenchmarkClient {
                 }
                 final Timer.Context ctx = timer.time();
                 if (Math.abs(i % sum) < writeRatio) {
-                    // put
+                    // put - counts toward totalRequests
+                    final int seq = sentCount.getAndIncrement();
+                    if (seq >= totalRequests) {
+                        slidingWindow.release();
+                        ctx.stop();
+                        break;
+                    }
                     final Timer.Context putCtx = putTimer.time();
                     final CompletableFuture<Boolean> f = put(rheaKVStore, keyBytes, valeBytes);
                     f.whenComplete((ignored, throwable) -> {
                         slidingWindow.release();
                         ctx.stop();
                         putCtx.stop();
+                        completionLatch.countDown();
                     });
                 } else {
-                    // get
+                    // get - does not count toward totalRequests
                     final Timer.Context getCtx = getTimer.time();
                     final CompletableFuture<byte[]> f = get(rheaKVStore, keyBytes);
                     f.whenComplete((ignored, throwable) -> {

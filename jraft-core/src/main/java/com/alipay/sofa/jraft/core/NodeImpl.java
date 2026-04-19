@@ -1356,11 +1356,8 @@ public class NodeImpl implements Node, RaftServerService {
 
                 // Show pull metrics if available
                 if (pullTimer != null && pullTimer.getCount() > 0) {
-                    final Snapshot ts = pullTimer.getSnapshot();
-                    final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
-                    final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
-                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s  latency(p50/p99)=%dms/%dms%n",
-                        pullTimer.getCount(), pullTimer.getOneMinuteRate(), p50Ms, p99Ms));
+                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s%n",
+                        pullTimer.getCount(), pullTimer.getOneMinuteRate()));
                     if (pullCountHist != null && pullCountHist.getCount() > 0) {
                         final Snapshot cs = pullCountHist.getSnapshot();
                         final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
@@ -1373,11 +1370,8 @@ public class NodeImpl implements Node, RaftServerService {
 
                 // Show push metrics if available
                 if (pushTimer != null && pushTimer.getCount() > 0) {
-                    final Snapshot ts = pushTimer.getSnapshot();
-                    final long p50Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.getMedian());
-                    final long p99Ms = TimeUnit.NANOSECONDS.toMillis((long) ts.get99thPercentile());
-                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s  latency(p50/p99)=%dms/%dms%n",
-                        pushTimer.getCount(), pushTimer.getOneMinuteRate(), p50Ms, p99Ms));
+                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s%n",
+                        pushTimer.getCount(), pushTimer.getOneMinuteRate()));
                     if (pushCountHist != null && pushCountHist.getCount() > 0) {
                         final Snapshot cs = pushCountHist.getSnapshot();
                         final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
@@ -2321,7 +2315,7 @@ public class NodeImpl implements Node, RaftServerService {
             final List<RaftOutter.EntryMeta> entriesList = new ArrayList<>();
             final List<ByteBuffer> dataBuffers = new ArrayList<>();
             long currentIndex = nextIndex;
-            final long maxIndex = Math.min(lastLogIndex, nextIndex + 100);
+            final long maxIndex = Math.min(lastLogIndex, nextIndex + this.raftOptions.getMaxEntriesSize());
             int totalDataSize = 0;
             final int maxBodySize = this.raftOptions.getMaxBodySize();
 

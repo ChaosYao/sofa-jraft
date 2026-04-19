@@ -578,7 +578,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             .setServerId(nodeImpl.getServerId().toString()).setPeerId(leaderId.toString()).setTerm(request.getTerm())
             .setPrevLogIndex(prevLogIndex).setPrevLogTerm(prevLogTerm).build();
 
-        LOG.info(
+        LOG.debug(
             "[NOTIFY-PULL] Node {} sending PullLogEntryRequest to leader {} groupId={} term={} prevLogIndex={} prevLogTerm={}",
             nodeImpl.getNodeId(), leaderId, request.getGroupId(), request.getTerm(), prevLogIndex, prevLogTerm);
 
@@ -640,7 +640,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                                                 Math.min(committedIndex, actualLastLogIndex));
                                         }
                                         success[0] = true;
-                                        LOG.info(
+                                        LOG.debug(
                                             "[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} actualLastLogIndex={} committedIndex={}",
                                             nodeImpl.getNodeId(), request.getGroupId(), entriesCount,
                                             lastAppendedIndex, actualLastLogIndex, committedIndex);

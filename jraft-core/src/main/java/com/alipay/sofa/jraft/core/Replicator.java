@@ -99,7 +99,7 @@ public class Replicator implements ThreadId.OnError {
     /** Timestamp of last notify RPC sent; used to throttle notify frequency. */
     private long                             lastNotifySendTimeMs   = 0;
     /** Minimum interval between notify RPCs in milliseconds. */
-    private static final long                NOTIFY_MIN_INTERVAL_MS = 10;
+    private static final long                NOTIFY_MIN_INTERVAL_MS = 1;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
