@@ -1356,8 +1356,8 @@ public class NodeImpl implements Node, RaftServerService {
 
                 // Show pull metrics if available
                 if (pullTimer != null && pullTimer.getCount() > 0) {
-                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s%n",
-                        pullTimer.getCount(), pullTimer.getOneMinuteRate()));
+                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s%n", pullTimer.getCount(),
+                        pullTimer.getOneMinuteRate()));
                     if (pullCountHist != null && pullCountHist.getCount() > 0) {
                         final Snapshot cs = pullCountHist.getSnapshot();
                         final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
@@ -1370,8 +1370,8 @@ public class NodeImpl implements Node, RaftServerService {
 
                 // Show push metrics if available
                 if (pushTimer != null && pushTimer.getCount() > 0) {
-                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s%n",
-                        pushTimer.getCount(), pushTimer.getOneMinuteRate()));
+                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s%n", pushTimer.getCount(),
+                        pushTimer.getOneMinuteRate()));
                     if (pushCountHist != null && pushCountHist.getCount() > 0) {
                         final Snapshot cs = pushCountHist.getSnapshot();
                         final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;

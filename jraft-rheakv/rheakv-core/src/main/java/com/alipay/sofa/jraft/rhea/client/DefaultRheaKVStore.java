@@ -1129,9 +1129,22 @@ public class DefaultRheaKVStore implements RheaKVStore {
                 }
             }
         } else {
-            // BatchPutRequest is not supported in benchmark mode
-            closure.setError(Errors.INVALID_REQUEST);
-            closure.run(new Status(-1, "BatchPut is not supported in benchmark mode"));
+            // BatchPutRequest is not defined in the proto on this branch, so fan out
+            // each KVEntry as an individual PutRequest RPC and aggregate the results.
+            final List<CompletableFuture<Boolean>> subFutures = Lists.newArrayListWithCapacity(subEntries.size());
+            for (final KVEntry entry : subEntries) {
+                final CompletableFuture<Boolean> subFuture = new CompletableFuture<>();
+                subFutures.add(subFuture);
+                internalPut(entry.getKey(), entry.getValue(), subFuture, retriesLeft, lastCause);
+            }
+            CompletableFuture.allOf(subFutures.toArray(new CompletableFuture[0]))
+                    .whenComplete((v, t) -> {
+                        if (t != null) {
+                            future.completeExceptionally(t);
+                        } else {
+                            future.complete(Boolean.TRUE);
+                        }
+                    });
         }
     }
 
