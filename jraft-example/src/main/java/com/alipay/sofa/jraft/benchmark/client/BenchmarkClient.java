@@ -51,23 +51,25 @@ import com.codahale.metrics.Timer;
  */
 public class BenchmarkClient {
 
-    private static final Logger LOG      = LoggerFactory.getLogger(BenchmarkClient.class);
+    private static final Logger LOG                         = LoggerFactory.getLogger(BenchmarkClient.class);
 
-    private static final byte[] BYTES    = new byte[] { 0, 1 };
-    private static final Timer  putTimer = KVMetrics.timer("put_benchmark_timer");
-    private static final Timer  timer    = KVMetrics.timer("benchmark_timer");
+    private static final byte[] BYTES                       = new byte[] { 0, 1 };
+    private static final Timer  putTimer                    = KVMetrics.timer("put_benchmark_timer");
+    private static final Timer  timer                       = KVMetrics.timer("benchmark_timer");
 
-    private static final int DEFAULT_TOTAL_REQUESTS = 3000;
+    private static final int    DEFAULT_TOTAL_REQUESTS      = 3000;
+    private static final int    DEFAULT_REQUEST_INTERVAL_MS = 15;
 
     public static void main(final String[] args) {
         if (args.length < 4) {
-            LOG.error("Args: [configPath], [threads], [valueSize], [totalPuts](optional, default=3000) are needed.");
+            LOG.error("Args: [configPath], [threads], [valueSize], [totalPuts](optional, default=3000), [requestIntervalMs](optional, default=15) are needed.");
             System.exit(-1);
         }
         final String configPath = args[1];
         final int threads = Integer.parseInt(args[2]);
         final int valueSize = Integer.parseInt(args[3]);
         final int totalPuts = args.length >= 5 ? Integer.parseInt(args[4]) : DEFAULT_TOTAL_REQUESTS;
+        final int requestIntervalMs = args.length >= 6 ? Integer.parseInt(args[5]) : DEFAULT_REQUEST_INTERVAL_MS;
 
         final RheaKVStoreOptions opts = Yaml.readConfig(configPath);
 
@@ -89,15 +91,16 @@ public class BenchmarkClient {
         int round = 0;
         while (true) {
             round++;
-            LOG.info("========== Round {} starting: totalPuts={}, threads={}, valueSize={} ==========",
-                round, totalPuts, threads, valueSize);
+            LOG.info(
+                "========== Round {} starting: totalPuts={}, threads={}, valueSize={}, requestIntervalMs={} ==========",
+                round, totalPuts, threads, valueSize, requestIntervalMs);
 
             final AtomicInteger sentCount = new AtomicInteger(0);
             final CountDownLatch completionLatch = new CountDownLatch(totalPuts);
 
             final long startTime = System.currentTimeMillis();
             startBenchmark(rheaKVStore, threads, valueSize, regionRouteTableOptionsList, totalPuts, sentCount,
-                completionLatch);
+                completionLatch, requestIntervalMs);
 
             try {
                 completionLatch.await();
@@ -110,7 +113,8 @@ public class BenchmarkClient {
             final long elapsedMs = System.currentTimeMillis() - startTime;
             final double elapsedSec = elapsedMs / 1000.0;
             final double throughput = totalPuts / elapsedSec;
-            LOG.info("========== Round {} completed: totalPuts={}, elapsedTime={}ms ({} s), throughput={} puts/s ==========",
+            LOG.info(
+                "========== Round {} completed: totalPuts={}, elapsedTime={}ms ({} s), throughput={} puts/s ==========",
                 round, totalPuts, elapsedMs, String.format("%.2f", elapsedSec), String.format("%.2f", throughput));
 
             stopBenchmark();
@@ -134,13 +138,13 @@ public class BenchmarkClient {
     public static void startBenchmark(final RheaKVStore rheaKVStore, final int threads, final int valueSize,
                                       final List<RegionRouteTableOptions> regionRouteTableOptionsList,
                                       final int totalPuts, final AtomicInteger sentCount,
-                                      final CountDownLatch completionLatch) {
+                                      final CountDownLatch completionLatch, final int requestIntervalMs) {
         shouldStop = false;
         benchmarkThreads = new Thread[threads];
         for (int i = 0; i < threads; i++) {
             final Thread t = new Thread(
                 () -> doRequest(rheaKVStore, valueSize, regionRouteTableOptionsList, totalPuts, sentCount,
-                    completionLatch));
+                    completionLatch, requestIntervalMs));
             t.setDaemon(false);
             benchmarkThreads[i] = t;
             t.start();
@@ -167,7 +171,7 @@ public class BenchmarkClient {
     public static void doRequest(final RheaKVStore rheaKVStore, final int valueSize,
                                  final List<RegionRouteTableOptions> regionRouteTableOptionsList,
                                  final int totalPuts, final AtomicInteger sentCount,
-                                 final CountDownLatch completionLatch) {
+                                 final CountDownLatch completionLatch, final int requestIntervalMs) {
         final int regionSize = regionRouteTableOptionsList.size();
         final ThreadLocalRandom random = ThreadLocalRandom.current();
         final Semaphore slidingWindow = new Semaphore(128);
@@ -180,6 +184,15 @@ public class BenchmarkClient {
                 break;
             }
             try {
+                if (requestIntervalMs > 0) {
+                    try {
+                        Thread.sleep(requestIntervalMs);
+                    } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        shouldStop = true;
+                        break;
+                    }
+                }
                 try {
                     slidingWindow.acquire();
                 } catch (final Exception e) {
