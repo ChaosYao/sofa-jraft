@@ -179,7 +179,7 @@ public class DefaultRheaKVStore implements RheaKVStore {
                                                                           .getLogger(DefaultRheaKVStore.class);
 
     /** Interval between individual fan-out PutRequest RPCs in {@code internalRegionPut}, in milliseconds. */
-    private static final long                  FANOUT_INTERVAL_MS     = 20L;
+    private static final long                  FANOUT_INTERVAL_MS     = 10L;
 
     static {
         ExtSerializerSupports.init();
