@@ -178,6 +178,9 @@ public class DefaultRheaKVStore implements RheaKVStore {
     private static final Logger                LOG                    = LoggerFactory
                                                                           .getLogger(DefaultRheaKVStore.class);
 
+    /** Interval between individual fan-out PutRequest RPCs in {@code internalRegionPut}, in milliseconds. */
+    private static final long                  FANOUT_INTERVAL_MS     = 20L;
+
     static {
         ExtSerializerSupports.init();
     }
@@ -1131,8 +1134,21 @@ public class DefaultRheaKVStore implements RheaKVStore {
         } else {
             // BatchPutRequest is not defined in the proto on this branch, so fan out
             // each KVEntry as an individual PutRequest RPC and aggregate the results.
+            // Throttle fan-out at FANOUT_INTERVAL_MS per request to avoid overwhelming
+            // the server; the Disruptor consumer blocking here acts as natural backpressure.
             final List<CompletableFuture<Boolean>> subFutures = Lists.newArrayListWithCapacity(subEntries.size());
+            boolean first = true;
             for (final KVEntry entry : subEntries) {
+                if (!first) {
+                    try {
+                        Thread.sleep(FANOUT_INTERVAL_MS);
+                    } catch (final InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        future.completeExceptionally(ie);
+                        return;
+                    }
+                }
+                first = false;
                 final CompletableFuture<Boolean> subFuture = new CompletableFuture<>();
                 subFutures.add(subFuture);
                 internalPut(entry.getKey(), entry.getValue(), subFuture, retriesLeft, lastCause);
