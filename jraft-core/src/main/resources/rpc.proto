@@ -104,6 +104,21 @@ message PullLogEntryResponse {
   optional ErrorResponse errorResponse = 99;
 };
 
+message PullAckRequest {
+  required string group_id = 1;
+  required string server_id = 2;
+  required string peer_id = 3;
+  required int64 term = 4;
+  required int64 first_log_index = 5;
+  required int64 last_log_index = 6;
+};
+
+message PullAckResponse {
+  required int64 term = 1;
+  required bool success = 2;
+  optional ErrorResponse errorResponse = 99;
+};
+
 message GetFileRequest {
   required int64 reader_id = 1;
   required string filename = 2;

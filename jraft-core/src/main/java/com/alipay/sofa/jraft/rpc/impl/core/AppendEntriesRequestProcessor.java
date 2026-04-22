@@ -46,6 +46,8 @@ import com.alipay.sofa.jraft.rpc.RpcRequests;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequestHeader;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullAckRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullAckResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryResponse;
 import com.alipay.sofa.jraft.rpc.RpcResponseClosure;
@@ -628,6 +630,7 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                         final long lastAppendedIndex = prevLogIndex + entries.size();
                         final int entriesCount = entries.size(); // 保存 entries 数量，避免闭包中访问时已被清空
 
+                        final long firstLogIndex = prevLogIndex + 1;
                         final LogManager.StableClosure stableClosure = new LogManager.StableClosure(entries) {
                             @Override
                             public void run(final Status stableStatus) {
@@ -644,6 +647,8 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
                                             "[NOTIFY-PULL] Node {} appended log entries successfully, groupId={} entriesCount={} lastAppendedIndex={} actualLastLogIndex={} committedIndex={}",
                                             nodeImpl.getNodeId(), request.getGroupId(), entriesCount,
                                             lastAppendedIndex, actualLastLogIndex, committedIndex);
+                                        sendPullAck(nodeImpl, request, leaderEndpoint, firstLogIndex,
+                                            actualLastLogIndex);
                                     } else {
                                         LOG.error("[NOTIFY-PULL] Node {} failed to append log entries: {}",
                                             nodeImpl.getNodeId(), stableStatus);
@@ -681,6 +686,27 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             return nextLogIndex[0];
         }
         return null;
+    }
+
+    private void sendPullAck(final NodeImpl nodeImpl, final AppendEntriesRequest notifyRequest,
+                             final Endpoint leaderEndpoint, final long firstLogIndex, final long lastLogIndex) {
+        final PullAckRequest ackRequest = PullAckRequest.newBuilder().setGroupId(notifyRequest.getGroupId())
+            .setServerId(nodeImpl.getServerId().toString()).setPeerId(notifyRequest.getServerId())
+            .setTerm(notifyRequest.getTerm()).setFirstLogIndex(firstLogIndex).setLastLogIndex(lastLogIndex).build();
+
+        nodeImpl.getRpcService().pullAck(leaderEndpoint, ackRequest, nodeImpl.getOptions().getElectionTimeoutMs(),
+            new RpcResponseClosureAdapter<PullAckResponse>() {
+                @Override
+                public void run(final Status status) {
+                    if (!status.isOk()) {
+                        LOG.warn("[PULL-ACK] Node {} failed to send PullAck to leader {}: {}", nodeImpl.getNodeId(),
+                            leaderEndpoint, status);
+                    } else {
+                        LOG.debug("[PULL-ACK] Node {} sent PullAck to leader {} firstLogIndex={} lastLogIndex={}",
+                            nodeImpl.getNodeId(), leaderEndpoint, firstLogIndex, lastLogIndex);
+                    }
+                }
+            });
     }
 
     private List<LogEntry> convertResponseToLogEntries(final PullLogEntryResponse response, final long startIndex) {

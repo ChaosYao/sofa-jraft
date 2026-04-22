@@ -18,6 +18,7 @@ package com.alipay.sofa.jraft.rpc;
 
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullAckRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.ReadIndexRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.ReadIndexResponse;
@@ -69,6 +70,15 @@ public interface RaftServerService {
      * @return the response message
      */
     Message handlePullLogEntryRequest(PullLogEntryRequest request, RpcRequestClosure done);
+
+    /**
+     * Handle pull-ack request (follower → leader) to drive commit after stable log append.
+     *
+     * @param request   pull ack data from follower
+     * @param done      callback
+     * @return the response message
+     */
+    Message handlePullAckRequest(PullAckRequest request, RpcRequestClosure done);
 
     /**
      * Handle install-snapshot request, return response message or

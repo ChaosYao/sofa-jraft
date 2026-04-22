@@ -100,6 +100,8 @@ public class Replicator implements ThreadId.OnError {
     private long                             lastNotifySendTimeMs   = 0;
     /** Minimum interval between notify RPCs in milliseconds. */
     private static final long                NOTIFY_MIN_INTERVAL_MS = 1;
+    /** True while a notify RPC is in-flight; suppress further notifies until the response returns. */
+    private volatile boolean                 notifyInFlight         = false;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -1612,10 +1614,11 @@ public class Replicator implements ThreadId.OnError {
             final long nowMs = Utils.monotonicMs();
             final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
 
-            if (!redundantNotify && !tooFrequent) {
+            if (!redundantNotify && !tooFrequent && !this.notifyInFlight) {
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
                 this.lastNotifySendTimeMs = nowMs;
+                this.notifyInFlight = true;
                 LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
                     this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
 
@@ -1624,7 +1627,7 @@ public class Replicator implements ThreadId.OnError {
 
                         @Override
                         public void run(final Status status) {
-                            // Notify response callback - no logging needed
+                            notifyInFlight = false;
                         }
                     });
             }

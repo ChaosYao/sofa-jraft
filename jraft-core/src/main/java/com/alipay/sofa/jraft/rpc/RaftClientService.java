@@ -76,6 +76,18 @@ public interface RaftClientService extends ClientService {
                                  final int timeoutMs, final RpcResponseClosure<RpcRequests.PullLogEntryResponse> done);
 
     /**
+     * Sends a pull-ack request (follower → leader) after stable log append, and handle the response with done.
+     *
+     * @param endpoint  destination address (ip, port)
+     * @param request   request data
+     * @param timeoutMs timeout millis
+     * @param done      callback
+     * @return a future with result
+     */
+    Future<Message> pullAck(final Endpoint endpoint, final RpcRequests.PullAckRequest request, final int timeoutMs,
+                            final RpcResponseClosure<RpcRequests.PullAckResponse> done);
+
+    /**
      * Sends a install-snapshot request and handle the response with done.
      *
      * @param endpoint destination address (ip, port)

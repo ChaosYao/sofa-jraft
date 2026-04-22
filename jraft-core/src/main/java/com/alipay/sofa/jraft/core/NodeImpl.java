@@ -87,6 +87,8 @@ import com.alipay.sofa.jraft.rpc.RaftServerService;
 import com.alipay.sofa.jraft.rpc.RpcRequestClosure;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.AppendEntriesResponse;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullAckRequest;
+import com.alipay.sofa.jraft.rpc.RpcRequests.PullAckResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryRequest;
 import com.alipay.sofa.jraft.rpc.RpcRequests.PullLogEntryResponse;
 import com.alipay.sofa.jraft.rpc.RpcRequests.InstallSnapshotRequest;
@@ -2398,9 +2400,7 @@ public class NodeImpl implements Node, RaftServerService {
                     final long newNextIndex = prevLogIndex + 1 + entriesList.size();
                     Replicator.updateNextIndex(replicatorId, newNextIndex);
                 }
-                if (!entriesList.isEmpty()) {
-                    triggerFollowersCommitCheckAsync(request.getGroupId(), nextIndex, currentIndex - 1);
-                }
+                // Commit is now driven by explicit PullAckRequest from follower after stable log append.
             }
 
             return response;
@@ -2415,70 +2415,46 @@ public class NodeImpl implements Node, RaftServerService {
         }
     }
 
-    private void triggerFollowersCommitCheckAsync(final String groupId, final long expectedFirstLogIndex,
-                                                  final long expectedLastLogIndex) {
-        if (expectedFirstLogIndex <= 0 || expectedLastLogIndex < expectedFirstLogIndex) {
-            return;
+    @Override
+    public Message handlePullAckRequest(final PullAckRequest request, final RpcRequestClosure done) {
+        LOG.debug(
+            "[PULL-ACK] Node {} received PullAckRequest from {} groupId={} term={} firstLogIndex={} lastLogIndex={}",
+            getNodeId(), request.getServerId(), request.getGroupId(), request.getTerm(), request.getFirstLogIndex(),
+            request.getLastLogIndex());
+
+        if (!this.state.isActive()) {
+            return RpcFactoryHelper.responseFactory().newResponse(PullAckResponse.getDefaultInstance(),
+                RaftError.EINVAL, "Node %s is not in active state, state %s.", getNodeId(), this.state.name());
         }
-        Utils.runInThread(() -> {
-            final long prevLogTerm = this.logManager.getTerm(expectedLastLogIndex);
-            if (prevLogTerm == 0 && expectedLastLogIndex != 0) {
-                LOG.warn("[PULL-ENTRY] Node {} cannot query followers for pull commit range [{}, {}], missing term.",
-                    getNodeId(), expectedFirstLogIndex, expectedLastLogIndex);
-                return;
-            }
-            final List<PeerId> followers = new ArrayList<>(this.conf.getConf().getPeers());
-            followers.remove(this.serverId);
-            for (final PeerId followerId : followers) {
-                triggerFollowerCommitCheckByHeartbeat(followerId, groupId, expectedFirstLogIndex, expectedLastLogIndex,
-                    prevLogTerm);
-            }
-        });
-    }
 
-    private void triggerFollowerCommitCheckByHeartbeat(final PeerId followerId, final String groupId,
-                                                       final long expectedFirstLogIndex,
-                                                       final long expectedLastLogIndex, final long prevLogTerm) {
-        final AppendEntriesRequest request = AppendEntriesRequest.newBuilder() //
-            .setGroupId(groupId) //
-            .setServerId(this.serverId.toString()) //
-            .setPeerId(followerId.toString()) //
-            .setTerm(this.currTerm) //
-            .setPrevLogIndex(expectedLastLogIndex) //
-            .setPrevLogTerm(prevLogTerm) //
-            .setCommittedIndex(this.ballotBox.getLastCommittedIndex()) //
-            .build();
+        if (request.getTerm() < this.currTerm) {
+            LOG.warn("[PULL-ACK] Node {} ignore stale PullAckRequest from {}, term={}, currTerm={}.", getNodeId(),
+                request.getServerId(), request.getTerm(), this.currTerm);
+            return PullAckResponse.newBuilder().setTerm(this.currTerm).setSuccess(false).build();
+        }
 
-        this.rpcService.appendEntries(followerId.getEndpoint(), request, this.options.getElectionTimeoutMs(),
-            new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+        if (this.state != State.STATE_LEADER) {
+            LOG.warn("[PULL-ACK] Node {} is not leader, ignore PullAckRequest from {}.", getNodeId(),
+                request.getServerId());
+            return PullAckResponse.newBuilder().setTerm(this.currTerm).setSuccess(false).build();
+        }
 
-                @Override
-                public void run(final Status status) {
-                    if (!status.isOk()) {
-                        LOG.warn("[PULL-ENTRY] Node {} failed to query follower {} by heartbeat: {}.", getNodeId(),
-                            followerId, status);
-                        return;
-                    }
-                    final AppendEntriesResponse response = getResponse();
-                    if (response == null) {
-                        LOG.warn("[PULL-ENTRY] Node {} got null heartbeat response from {}.", getNodeId(), followerId);
-                        return;
-                    }
-                    if (response.getTerm() > NodeImpl.this.currTerm) {
-                        increaseTermTo(response.getTerm(), new Status(RaftError.EHIGHERTERMRESPONSE,
-                            "Leader receives higher term append_entries_response from peer:%s", followerId));
-                        return;
-                    }
-                    final long followerLastLogIndex = response.hasLastLogIndex() ? response.getLastLogIndex() : 0L;
-                    final long commitLastLogIndex = Math.min(expectedLastLogIndex, followerLastLogIndex);
-                    if (commitLastLogIndex >= expectedFirstLogIndex) {
-                        ballotBox.commitAt(expectedFirstLogIndex, commitLastLogIndex, followerId);
-                        LOG.info(
-                            "[PULL-ENTRY] Node {} queried follower {} by heartbeat, lastLogIndex={}, committed pull range [{}, {}].",
-                            getNodeId(), followerId, followerLastLogIndex, expectedFirstLogIndex, commitLastLogIndex);
-                    }
-                }
-            });
+        final PeerId followerId = new PeerId();
+        if (!followerId.parse(request.getServerId())) {
+            return RpcFactoryHelper.responseFactory().newResponse(PullAckResponse.getDefaultInstance(),
+                RaftError.EINVAL, "Parse serverId failed: %s.", request.getServerId());
+        }
+
+        final long firstLogIndex = request.getFirstLogIndex();
+        final long lastLogIndex = request.getLastLogIndex();
+
+        if (lastLogIndex >= firstLogIndex) {
+            this.ballotBox.commitAt(firstLogIndex, lastLogIndex, followerId);
+            LOG.debug("[PULL-ACK] Node {} committed pull range [{}, {}] for follower {}.", getNodeId(), firstLogIndex,
+                lastLogIndex, followerId);
+        }
+
+        return PullAckResponse.newBuilder().setTerm(this.currTerm).setSuccess(true).build();
     }
 
     private LogEntry logEntryFromMeta(final long index, final ByteBuffer allData, final RaftOutter.EntryMeta entry) {
