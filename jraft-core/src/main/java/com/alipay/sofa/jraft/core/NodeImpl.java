@@ -225,6 +225,13 @@ public class NodeImpl implements Node, RaftServerService {
     private long                                                           prevNetTxBytes           = -1;
     private long                                                           prevDiskReadSectors      = -1;
     private long                                                           prevDiskWriteSectors     = -1;
+    // First commit time for avg commit time calculation in leader dashboard
+    private volatile long                                                  firstCommitTimeMs        = -1;
+    private volatile long                                                  firstCommitIndex         = -1;
+    // Last commit index at which dashboard was printed (for 1000-commit gate)
+    private volatile long                                                  lastDashboardCommitIndex = -1;
+    // Timestamp of last dashboard print (for network/disk rate calculation)
+    private volatile long                                                  lastDashboardTimeMs      = -1;
     private ThreadId                                                       wakingCandidate;
     /** Disruptor to run node service */
     private Disruptor<LogEntryAndClosure>                                  applyDisruptor;
@@ -1267,12 +1274,27 @@ public class NodeImpl implements Node, RaftServerService {
         }
         this.confCtx.flush(this.conf.getConf(), this.conf.getOldConf());
         this.stepDownTimer.start();
-        this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 60,
+        // Baseline = last index before this leader term, so dashboard fires on every 1000 new commits
+        this.lastDashboardCommitIndex = this.logManager.getLastLogIndex();
+        this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 1,
             TimeUnit.SECONDS);
     }
 
     private void logLeaderResourceUsage() {
         try {
+            // --- Commit-count-based gate: print every 1000 new commits ---
+            final long committedIndex = this.ballotBox.getLastCommittedIndex();
+            // Track first commit time (always, before the gate)
+            if (this.firstCommitTimeMs < 0 && committedIndex > 0) {
+                this.firstCommitTimeMs = System.currentTimeMillis();
+                this.firstCommitIndex = committedIndex;
+            }
+            // Only log every 1000 new commits (baseline set in becomeLeader)
+            if (committedIndex - this.lastDashboardCommitIndex < 1000) {
+                return;
+            }
+
+            final long nowMs = System.currentTimeMillis();
             final StringBuilder sb = new StringBuilder();
             final String nodeId = String.valueOf(getNodeId());
             final String divider = "============================================================";
@@ -1282,7 +1304,6 @@ public class NodeImpl implements Node, RaftServerService {
 
             // Raft state
             final long lastLogIndex = this.logManager.getLastLogIndex();
-            final long committedIndex = this.ballotBox.getLastCommittedIndex();
             sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitIndex=%d%n", lastLogIndex, committedIndex));
 
             // CPU & Memory
@@ -1308,14 +1329,16 @@ public class NodeImpl implements Node, RaftServerService {
             }
 
             // Network bandwidth (Linux only, /proc/net/dev)
+            // Use actual elapsed ms between dashboard prints for accurate rate
+            final long elapsedMs = this.lastDashboardTimeMs > 0 ? nowMs - this.lastDashboardTimeMs : -1;
             final long[] netStats = readNetStats();
             if (netStats[0] < 0) {
                 sb.append("  [Network] N/A (non-Linux or /proc/net/dev unreadable)\n");
-            } else if (this.prevNetRxBytes < 0) {
+            } else if (this.prevNetRxBytes < 0 || elapsedMs <= 0) {
                 sb.append("  [Network] rx=N/A (first sample, will show next cycle)\n");
             } else {
-                final long rxKBps = (netStats[0] - this.prevNetRxBytes) / 1024 / 60;
-                final long txKBps = (netStats[1] - this.prevNetTxBytes) / 1024 / 60;
+                final long rxKBps = (netStats[0] - this.prevNetRxBytes) * 1000L / 1024L / elapsedMs;
+                final long txKBps = (netStats[1] - this.prevNetTxBytes) * 1000L / 1024L / elapsedMs;
                 sb.append(String.format("  [Network] rx=%-8s  tx=%s%n", formatBandwidth(rxKBps),
                     formatBandwidth(txKBps)));
             }
@@ -1328,11 +1351,11 @@ public class NodeImpl implements Node, RaftServerService {
             final long[] diskStats = readDiskStats();
             if (diskStats[0] < 0) {
                 sb.append("  [Disk IO] N/A (non-Linux or /proc/diskstats unreadable)\n");
-            } else if (this.prevDiskReadSectors < 0) {
+            } else if (this.prevDiskReadSectors < 0 || elapsedMs <= 0) {
                 sb.append("  [Disk IO] read=N/A (first sample, will show next cycle)\n");
             } else {
-                final long readKBps = (diskStats[0] - this.prevDiskReadSectors) * 512 / 1024 / 60;
-                final long writeKBps = (diskStats[1] - this.prevDiskWriteSectors) * 512 / 1024 / 60;
+                final long readKBps = (diskStats[0] - this.prevDiskReadSectors) * 512L * 1000L / 1024L / elapsedMs;
+                final long writeKBps = (diskStats[1] - this.prevDiskWriteSectors) * 512L * 1000L / 1024L / elapsedMs;
                 sb.append(String.format("  [Disk IO] read=%-8s  write=%s%n", formatBandwidth(readKBps),
                     formatBandwidth(writeKBps)));
             }
@@ -1341,11 +1364,28 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevDiskWriteSectors = diskStats[1];
             }
 
+            // Commit metrics: avg commit time and commit rate
+            if (this.firstCommitTimeMs >= 0) {
+                final long totalCommits = committedIndex - this.firstCommitIndex + 1;
+                final long commitElapsedMs = nowMs - this.firstCommitTimeMs;
+                if (commitElapsedMs > 0 && totalCommits > 0) {
+                    final double avgCommitMs = (double) commitElapsedMs / totalCommits;
+                    final double commitRate = totalCommits * 1000.0 / commitElapsedMs;
+                    sb.append(String.format("  [Commit]  avgCommitTime=%.2fms  commitRate=%.1f/s%n", avgCommitMs,
+                        commitRate));
+                }
+            } else {
+                sb.append("  [Commit]  N/A (no commits yet)\n");
+            }
+
             // Replication metrics (auto-detect push vs pull mode)
             final MetricRegistry registry = this.metrics.getMetricRegistry();
             if (registry == null) {
                 sb.append("  [Repl]    N/A (enableMetrics=false, set NodeOptions.enableMetrics=true)\n");
             } else {
+                final long totalRequests = sumDashboardRequestCounts(registry);
+                sb.append(String.format("  [Request] total=%d%n", totalRequests));
+
                 // Pull mode metrics
                 final Timer pullTimer = registry.getTimers().get("handle-pull-log-entry");
                 final Histogram pullCountHist = registry.getHistograms().get("handle-pull-log-entry-count");
@@ -1356,46 +1396,52 @@ public class NodeImpl implements Node, RaftServerService {
                 final Histogram pushCountHist = registry.getHistograms().get("replicate-entries-count");
                 final Histogram pushSizeHist = registry.getHistograms().get("replicate-entries-bytes");
 
-                // Show pull metrics if available
-                if (pullTimer != null && pullTimer.getCount() > 0) {
-                    sb.append(String.format("  [Pull]    total=%-6d  rate=%.1f/s%n", pullTimer.getCount(),
-                        pullTimer.getOneMinuteRate()));
-                    if (pullCountHist != null && pullCountHist.getCount() > 0) {
-                        final Snapshot cs = pullCountHist.getSnapshot();
-                        final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
-                        sb.append(String.format(
-                            "  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n", (long) cs
-                                .getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
-                            ss != null ? (long) ss.get99thPercentile() : 0L));
-                    }
+                if (pullTimer != null && pullTimer.getCount() > 0 && pullCountHist != null
+                    && pullCountHist.getCount() > 0) {
+                    final Snapshot cs = pullCountHist.getSnapshot();
+                    final Snapshot ss = pullSizeHist != null ? pullSizeHist.getSnapshot() : null;
+                    sb.append(String.format("  [Pull]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
+                        (long) cs.getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
+                        ss != null ? (long) ss.get99thPercentile() : 0L));
                 }
 
-                // Show push metrics if available
-                if (pushTimer != null && pushTimer.getCount() > 0) {
-                    sb.append(String.format("  [Push]    total=%-6d  rate=%.1f/s%n", pushTimer.getCount(),
-                        pushTimer.getOneMinuteRate()));
-                    if (pushCountHist != null && pushCountHist.getCount() > 0) {
-                        final Snapshot cs = pushCountHist.getSnapshot();
-                        final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
-                        sb.append(String.format(
-                            "  [Push]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n", (long) cs
-                                .getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
-                            ss != null ? (long) ss.get99thPercentile() : 0L));
-                    }
-                }
-
-                // Neither mode has data yet
-                if ((pullTimer == null || pullTimer.getCount() == 0)
-                    && (pushTimer == null || pushTimer.getCount() == 0)) {
-                    sb.append("  [Repl]    requests=0 (no replication activity yet)\n");
+                if (pushTimer != null && pushTimer.getCount() > 0 && pushCountHist != null
+                    && pushCountHist.getCount() > 0) {
+                    final Snapshot cs = pushCountHist.getSnapshot();
+                    final Snapshot ss = pushSizeHist != null ? pushSizeHist.getSnapshot() : null;
+                    sb.append(String.format("  [Push]    entries/req(p50/p99)=%d/%d  dataSize/req(p50/p99)=%d/%d B%n",
+                        (long) cs.getMedian(), (long) cs.get99thPercentile(), ss != null ? (long) ss.getMedian() : 0L,
+                        ss != null ? (long) ss.get99thPercentile() : 0L));
                 }
             }
 
             sb.append(divider);
             LOG.info(sb.toString());
+
+            // Advance by 1000 (not to committedIndex) to keep trigger points aligned
+            // to exact 1000-commit boundaries, preventing drift.
+            this.lastDashboardCommitIndex += 1000;
+            this.lastDashboardTimeMs = nowMs;
         } catch (final Exception e) {
             LOG.warn("Node {} failed to log leader dashboard.", getNodeId(), e);
         }
+    }
+
+    private static long sumDashboardRequestCounts(final MetricRegistry registry) {
+        long total = 0;
+        total += getTimerCount(registry, "replicate-entries");
+        total += getTimerCount(registry, "handle-pull-log-entry");
+        total += getTimerCount(registry, "handle-append-entries");
+        total += getTimerCount(registry, "handle-read-index");
+        total += getTimerCount(registry, "request-vote");
+        total += getTimerCount(registry, "pre-vote");
+        total += getTimerCount(registry, "install-snapshot");
+        return total;
+    }
+
+    private static long getTimerCount(final MetricRegistry registry, final String name) {
+        final Timer timer = registry.getTimers().get(name);
+        return timer != null ? timer.getCount() : 0L;
     }
 
     /** Read total rx/tx bytes across all non-loopback interfaces from /proc/net/dev.
@@ -1496,6 +1542,10 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevNetTxBytes = -1;
                 this.prevDiskReadSectors = -1;
                 this.prevDiskWriteSectors = -1;
+                this.firstCommitTimeMs = -1;
+                this.firstCommitIndex = -1;
+                this.lastDashboardCommitIndex = -1;
+                this.lastDashboardTimeMs = -1;
             }
         }
         // reset leader_id
