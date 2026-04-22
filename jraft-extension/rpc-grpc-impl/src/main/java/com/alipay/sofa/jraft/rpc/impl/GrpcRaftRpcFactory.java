@@ -58,6 +58,7 @@ public class GrpcRaftRpcFactory implements RaftRpcFactory {
     {
         parserClasses.put(RpcRequests.PullLogEntryRequest.class.getName(),
             RpcRequests.PullLogEntryRequest.getDefaultInstance());
+        parserClasses.put(RpcRequests.PullAckRequest.class.getName(), RpcRequests.PullAckRequest.getDefaultInstance());
     }
 
     final MarshallerRegistry        defaultMarshallerRegistry      = new MarshallerRegistry() {
