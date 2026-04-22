@@ -1274,8 +1274,10 @@ public class NodeImpl implements Node, RaftServerService {
         }
         this.confCtx.flush(this.conf.getConf(), this.conf.getOldConf());
         this.stepDownTimer.start();
-        // Baseline = last index before this leader term, so dashboard fires on every 1000 new commits
-        this.lastDashboardCommitIndex = this.logManager.getLastLogIndex();
+        // Snap baseline to the floor 1000-boundary so dashboard triggers land on clean multiples
+        // of 1000 (e.g. 2000, 3000, ...) regardless of where the last log index happens to be.
+        final long lastIdx = this.logManager.getLastLogIndex();
+        this.lastDashboardCommitIndex = (lastIdx / 1000) * 1000;
         this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 1,
             TimeUnit.SECONDS);
     }
@@ -1302,9 +1304,11 @@ public class NodeImpl implements Node, RaftServerService {
             sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
             sb.append(divider).append('\n');
 
-            // Raft state
+            // Raft state — show the trigger boundary (aligned to 1000) rather than the live
+            // committedIndex so successive dashboards print stable, drift-free boundaries.
             final long lastLogIndex = this.logManager.getLastLogIndex();
-            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitIndex=%d%n", lastLogIndex, committedIndex));
+            final long triggerBoundary = this.lastDashboardCommitIndex + 1000;
+            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitBoundary=%d%n", lastLogIndex, triggerBoundary));
 
             // CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
