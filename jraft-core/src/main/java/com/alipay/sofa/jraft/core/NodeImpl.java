@@ -225,9 +225,6 @@ public class NodeImpl implements Node, RaftServerService {
     private long                                                           prevNetTxBytes           = -1;
     private long                                                           prevDiskReadSectors      = -1;
     private long                                                           prevDiskWriteSectors     = -1;
-    // First commit time for avg commit time calculation in leader dashboard
-    private volatile long                                                  firstCommitTimeMs        = -1;
-    private volatile long                                                  firstCommitIndex         = -1;
     // Last commit index at which dashboard was printed (for 1000-commit gate)
     private volatile long                                                  lastDashboardCommitIndex = -1;
     // Timestamp of last dashboard print (for network/disk rate calculation)
@@ -1286,11 +1283,6 @@ public class NodeImpl implements Node, RaftServerService {
         try {
             // --- Commit-count-based gate: print every 1000 new commits ---
             final long committedIndex = this.ballotBox.getLastCommittedIndex();
-            // Track first commit time (always, before the gate)
-            if (this.firstCommitTimeMs < 0 && committedIndex > 0) {
-                this.firstCommitTimeMs = System.currentTimeMillis();
-                this.firstCommitIndex = committedIndex;
-            }
             // Only log every 1000 new commits (baseline set in becomeLeader)
             if (committedIndex - this.lastDashboardCommitIndex < 1000) {
                 return;
@@ -1368,18 +1360,15 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevDiskWriteSectors = diskStats[1];
             }
 
-            // Commit metrics: avg commit time and commit rate
-            if (this.firstCommitTimeMs >= 0) {
-                final long totalCommits = committedIndex - this.firstCommitIndex + 1;
-                final long commitElapsedMs = nowMs - this.firstCommitTimeMs;
-                if (commitElapsedMs > 0 && totalCommits > 0) {
-                    final double avgCommitMs = (double) commitElapsedMs / totalCommits;
-                    final double commitRate = totalCommits * 1000.0 / commitElapsedMs;
-                    sb.append(String.format("  [Commit]  avgCommitTime=%.2fms  commitRate=%.1f/s%n", avgCommitMs,
-                        commitRate));
-                }
+            // Commit metrics: sliding-window rate over the last interval (same window as network/disk)
+            final long windowCommits = triggerBoundary - this.lastDashboardCommitIndex;
+            if (elapsedMs > 0 && windowCommits > 0) {
+                final double avgCommitMs = (double) elapsedMs / windowCommits;
+                final double commitRate = windowCommits * 1000.0 / elapsedMs;
+                sb.append(String.format("  [Commit]  avgCommitTime=%.2fms  commitRate=%.1f/s%n", avgCommitMs,
+                    commitRate));
             } else {
-                sb.append("  [Commit]  N/A (no commits yet)\n");
+                sb.append("  [Commit]  N/A (first sample, will show next cycle)\n");
             }
 
             // Replication metrics (auto-detect push vs pull mode)
@@ -1546,8 +1535,6 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevNetTxBytes = -1;
                 this.prevDiskReadSectors = -1;
                 this.prevDiskWriteSectors = -1;
-                this.firstCommitTimeMs = -1;
-                this.firstCommitIndex = -1;
                 this.lastDashboardCommitIndex = -1;
                 this.lastDashboardTimeMs = -1;
             }
