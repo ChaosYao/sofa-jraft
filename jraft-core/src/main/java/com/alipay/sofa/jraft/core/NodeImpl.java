@@ -2457,6 +2457,11 @@ public class NodeImpl implements Node, RaftServerService {
                 // Commit is now driven by explicit PullAckRequest from follower after stable log append.
             }
 
+            try {
+                Thread.sleep(10);
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             return response;
         } catch (Exception e) {
             LOG.error("[PULL-ENTRY] Node {} failed to handle PullLogEntryRequest, groupId={}, error={}", getNodeId(),
