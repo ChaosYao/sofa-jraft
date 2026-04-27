@@ -1011,6 +1011,23 @@ public class Replicator implements ThreadId.OnError {
         RpcUtils.runInThread(() -> onBlockTimeoutInNewThread(arg));
     }
 
+    /**
+     * Called by the leader when a PullAck is received from a follower.
+     * Updates nextIndex and kicks off the next notify cycle (or waits if caught up).
+     */
+    static void onPullAck(final ThreadId id, final long lastLogIndex) {
+        if (id == null) {
+            return;
+        }
+        final Replicator r = (Replicator) id.lock();
+        if (r == null) {
+            return;
+        }
+        r.waitId = -1;
+        r.nextIndex = lastLogIndex + 1;
+        r.notifyNextIndex(r.nextIndex);
+    }
+
     void block(final long startTimeMs, @SuppressWarnings("unused") final int errorCode) {
         // TODO: Currently we don't care about error_code which indicates why the
         // very RPC fails. To make it better there should be different timeout for
@@ -1606,15 +1623,11 @@ public class Replicator implements ThreadId.OnError {
             final long term = request.getTerm();
             final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
 
-            // Throttle notify frequency to prevent busy loop:
-            // When benchmark client writes continuously, waitMoreEntries callback fires
-            // immediately after each notify (new entries always available), causing a
-            // tight loop of notify -> wait -> callback -> notify without any backpressure
-            // (unlike push mode where sendEntries blocks until RPC response).
             final long nowMs = Utils.monotonicMs();
             final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
 
             if (!redundantNotify && !tooFrequent && !this.notifyInFlight) {
+                // Send notify; backpressure comes from PullAck — onPullAck() drives the next cycle.
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
                 this.lastNotifySendTimeMs = nowMs;
@@ -1630,15 +1643,21 @@ public class Replicator implements ThreadId.OnError {
                             notifyInFlight = false;
                         }
                     });
-            }
-
-            if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
-                installSnapshot();
+                // Do NOT call waitMoreEntries here: the next cycle is triggered by onPullAck()
+                // after the follower has pulled and confirmed. This provides the same backpressure
+                // as push mode's sendEntries() waiting for the RPC response.
+            } else if (redundantNotify) {
+                // No new entries beyond what follower already knows — wait for more.
+                if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
+                    installSnapshot();
+                    doUnlock = false;
+                    return;
+                }
+                waitMoreEntries(nextIndex);
                 doUnlock = false;
-                return;
             }
-            waitMoreEntries(nextIndex);
-            doUnlock = false;
+            // tooFrequent || notifyInFlight: a notify is already in-flight;
+            // onPullAck() will drive the next cycle when the follower responds.
         } finally {
             if (doUnlock) {
                 this.id.unlock();

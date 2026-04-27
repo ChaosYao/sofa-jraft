@@ -1308,7 +1308,8 @@ public class NodeImpl implements Node, RaftServerService {
             // committedIndex so successive dashboards print stable, drift-free boundaries.
             final long lastLogIndex = this.logManager.getLastLogIndex();
             final long triggerBoundary = this.lastDashboardCommitIndex + 1000;
-            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitBoundary=%d%n", lastLogIndex, triggerBoundary));
+            sb.append(String
+                .format("  [Raft]    lastLogIndex=%-8d  commitBoundary=%d%n", lastLogIndex, triggerBoundary));
 
             // CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
@@ -2511,6 +2512,13 @@ public class NodeImpl implements Node, RaftServerService {
             this.ballotBox.commitAt(firstLogIndex, lastLogIndex, followerId);
             LOG.debug("[PULL-ACK] Node {} committed pull range [{}, {}] for follower {}.", getNodeId(), firstLogIndex,
                 lastLogIndex, followerId);
+        }
+
+        // Drive next notify cycle: either send notify if new entries arrived, or waitMoreEntries.
+        // This provides backpressure equivalent to push mode's sendEntries() RTT.
+        final ThreadId rid = this.replicatorGroup.getReplicator(followerId);
+        if (rid != null) {
+            Replicator.onPullAck(rid, lastLogIndex);
         }
 
         return PullAckResponse.newBuilder().setTerm(this.currTerm).setSuccess(true).build();
