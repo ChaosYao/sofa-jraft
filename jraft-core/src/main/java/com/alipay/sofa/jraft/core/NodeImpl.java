@@ -2508,7 +2508,8 @@ public class NodeImpl implements Node, RaftServerService {
         final long lastLogIndex = request.getLastLogIndex();
 
         if (lastLogIndex >= firstLogIndex) {
-            this.ballotBox.commitAt(firstLogIndex, lastLogIndex, followerId);
+            // DEBUG: commit disabled to isolate CPU cost of commitAt in pull mode
+            // this.ballotBox.commitAt(firstLogIndex, lastLogIndex, followerId);
             LOG.debug("[PULL-ACK] Node {} committed pull range [{}, {}] for follower {}.", getNodeId(), firstLogIndex,
                 lastLogIndex, followerId);
         }
