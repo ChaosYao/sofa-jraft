@@ -1758,11 +1758,6 @@ public class Replicator implements ThreadId.OnError {
         final long monotonicSendTimeMs = Utils.monotonicMs();
         final int seq = getAndIncrementReqSeq();
 
-        try {
-            Thread.sleep(10);
-        } catch (final InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
         Future<Message> rpcFuture = null;
         try {
             rpcFuture = this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
