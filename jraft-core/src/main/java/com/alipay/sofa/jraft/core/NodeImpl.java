@@ -228,8 +228,6 @@ public class NodeImpl implements Node, RaftServerService {
     // Baseline for cumulative commit rate (set after first 1000 commits to skip JVM warm-up)
     private volatile long                                                  firstCommitTimeMs        = -1;
     private volatile long                                                  firstCommitIndex         = -1;
-    // Last commit index at which dashboard was printed (for 1000-commit gate)
-    private volatile long                                                  lastDashboardCommitIndex = -1;
     // Timestamp of last dashboard print (for network/disk rate calculation)
     private volatile long                                                  lastDashboardTimeMs      = -1;
     private ThreadId                                                       wakingCandidate;
@@ -1274,26 +1272,17 @@ public class NodeImpl implements Node, RaftServerService {
         }
         this.confCtx.flush(this.conf.getConf(), this.conf.getOldConf());
         this.stepDownTimer.start();
-        // Snap baseline to the floor 1000-boundary so dashboard triggers land on clean multiples
-        // of 1000 (e.g. 2000, 3000, ...) regardless of where the last log index happens to be.
-        final long lastIdx = this.logManager.getLastLogIndex();
-        this.lastDashboardCommitIndex = (lastIdx / 1000) * 1000;
-        this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 1,
+        this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 5,
             TimeUnit.SECONDS);
     }
 
     private void logLeaderResourceUsage() {
         try {
-            // --- Commit-count-based gate: print every 1000 new commits ---
             final long committedIndex = this.ballotBox.getLastCommittedIndex();
             // Start tracking commit rate baseline after first 1000 commits (skip JVM warm-up)
             if (this.firstCommitTimeMs < 0 && committedIndex > 1000) {
                 this.firstCommitTimeMs = System.currentTimeMillis();
                 this.firstCommitIndex = committedIndex;
-            }
-            // Only log every 1000 new commits (baseline set in becomeLeader)
-            if (committedIndex - this.lastDashboardCommitIndex < 1000) {
-                return;
             }
 
             final long nowMs = System.currentTimeMillis();
@@ -1304,11 +1293,8 @@ public class NodeImpl implements Node, RaftServerService {
             sb.append("  Leader Dashboard  ").append(nodeId).append('\n');
             sb.append(divider).append('\n');
 
-            // Raft state — show the trigger boundary (aligned to 1000) rather than the live
-            // committedIndex so successive dashboards print stable, drift-free boundaries.
             final long lastLogIndex = this.logManager.getLastLogIndex();
-            final long triggerBoundary = this.lastDashboardCommitIndex + 1000;
-            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  commitBoundary=%d%n", lastLogIndex, triggerBoundary));
+            sb.append(String.format("  [Raft]    lastLogIndex=%-8d  committedIndex=%d%n", lastLogIndex, committedIndex));
 
             // CPU & Memory
             final Runtime runtime = Runtime.getRuntime();
@@ -1422,9 +1408,6 @@ public class NodeImpl implements Node, RaftServerService {
             sb.append(divider);
             LOG.info(sb.toString());
 
-            // Advance by 1000 (not to committedIndex) to keep trigger points aligned
-            // to exact 1000-commit boundaries, preventing drift.
-            this.lastDashboardCommitIndex += 1000;
             this.lastDashboardTimeMs = nowMs;
         } catch (final Exception e) {
             LOG.warn("Node {} failed to log leader dashboard.", getNodeId(), e);
@@ -1548,7 +1531,6 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevDiskWriteSectors = -1;
                 this.firstCommitTimeMs = -1;
                 this.firstCommitIndex = -1;
-                this.lastDashboardCommitIndex = -1;
                 this.lastDashboardTimeMs = -1;
             }
         }
