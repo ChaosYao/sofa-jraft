@@ -1614,23 +1614,20 @@ public class Replicator implements ThreadId.OnError {
             final long nowMs = Utils.monotonicMs();
             final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
 
-            if (!redundantNotify && !tooFrequent && !this.notifyInFlight) {
-                this.lastNotifyHintIndex = hintIndex;
-                this.lastNotifyTerm = term;
-                this.lastNotifySendTimeMs = nowMs;
-                this.notifyInFlight = true;
-                LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
-                    this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
-
-                this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
-                    new RpcResponseClosureAdapter<AppendEntriesResponse>() {
-
-                        @Override
-                        public void run(final Status status) {
-                            notifyInFlight = false;
-                        }
-                    });
-            }
+            // DEBUG: notify RPC disabled to isolate CPU cost of notify+pull round-trips
+            // if (!redundantNotify && !tooFrequent && !this.notifyInFlight) {
+            //     this.lastNotifyHintIndex = hintIndex;
+            //     this.lastNotifyTerm = term;
+            //     this.lastNotifySendTimeMs = nowMs;
+            //     this.notifyInFlight = true;
+            //     this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
+            //         new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+            //             @Override
+            //             public void run(final Status status) {
+            //                 notifyInFlight = false;
+            //             }
+            //         });
+            // }
 
             if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
                 installSnapshot();
