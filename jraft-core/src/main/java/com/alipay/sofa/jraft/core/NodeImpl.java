@@ -223,9 +223,13 @@ public class NodeImpl implements Node, RaftServerService {
     private long                                                           prevNetTxBytes           = -1;
     private long                                                           prevDiskReadSectors      = -1;
     private long                                                           prevDiskWriteSectors     = -1;
-    // First commit time for avg commit time calculation in leader dashboard
+    // First commit time for avg commit time calculation in leader dashboard.
+    // The baseline is taken after the first 1000 commits of this leadership so the
+    // startup long tail (cluster/JIT warm-up, leader settling) is excluded.
     private volatile long                                                  firstCommitTimeMs        = -1;
     private volatile long                                                  firstCommitIndex         = -1;
+    // committedIndex at which avg-commit-time stats begin (warm-up cutoff = leadership start floor + 1000)
+    private volatile long                                                  commitStatStartIndex     = -1;
     // Last commit index at which dashboard was printed (for 1000-commit gate)
     private volatile long                                                  lastDashboardCommitIndex = -1;
     // Timestamp of last dashboard print (for network/disk rate calculation)
@@ -1275,6 +1279,9 @@ public class NodeImpl implements Node, RaftServerService {
         // Baseline snapped to floor 1000-boundary so the first trigger always lands at a clean multiple.
         final long initialLastLogIndex = this.logManager.getLastLogIndex();
         this.lastDashboardCommitIndex = (initialLastLogIndex / 1000) * 1000;
+        // Skip the first 1000 commits of this leadership when measuring avg commit time,
+        // so the startup long tail does not skew the cumulative average.
+        this.commitStatStartIndex = this.lastDashboardCommitIndex + 1000;
         this.leaderResourceLogTask = this.timerManager.scheduleAtFixedRate(this::logLeaderResourceUsage, 0, 1,
             TimeUnit.SECONDS);
     }
@@ -1283,8 +1290,9 @@ public class NodeImpl implements Node, RaftServerService {
         try {
             // --- Commit-count-based gate: print every 1000 new commits ---
             final long committedIndex = this.ballotBox.getLastCommittedIndex();
-            // Track first commit time (always, before the gate)
-            if (this.firstCommitTimeMs < 0 && committedIndex > 0) {
+            // Take the stats baseline only once the first 1000 commits of this leadership have
+            // elapsed (warm-up cutoff), so the startup long tail is excluded from avg commit time.
+            if (this.firstCommitTimeMs < 0 && committedIndex >= this.commitStatStartIndex) {
                 this.firstCommitTimeMs = System.currentTimeMillis();
                 this.firstCommitIndex = committedIndex;
             }
@@ -1549,6 +1557,7 @@ public class NodeImpl implements Node, RaftServerService {
                 this.prevDiskWriteSectors = -1;
                 this.firstCommitTimeMs = -1;
                 this.firstCommitIndex = -1;
+                this.commitStatStartIndex = -1;
                 this.lastDashboardCommitIndex = -1;
                 this.lastDashboardTimeMs = -1;
             }
