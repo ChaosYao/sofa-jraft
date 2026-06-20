@@ -96,10 +96,6 @@ public class Replicator implements ThreadId.OnError {
     /** Last notify RPC content; skip send when leader {@code hintIndex} and term are unchanged. */
     private long                             lastNotifyHintIndex    = -1;
     private long                             lastNotifyTerm         = -1;
-    /** Timestamp of last notify RPC sent; used to throttle notify frequency. */
-    private long                             lastNotifySendTimeMs   = 0;
-    /** Minimum interval between notify RPCs in milliseconds. */
-    private static final long                NOTIFY_MIN_INTERVAL_MS = 1;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -1600,22 +1596,16 @@ public class Replicator implements ThreadId.OnError {
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
 
+            // hintIndex is the leader's current lastLogIndex (see fillCommonFields); it tells the
+            // follower how far to pull. Once we have notified for this hintIndex there is nothing
+            // more to announce until the leader appends a newer entry.
             final long hintIndex = request.getHintIndex();
             final long term = request.getTerm();
             final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
 
-            // Throttle notify frequency to prevent busy loop:
-            // When benchmark client writes continuously, waitMoreEntries callback fires
-            // immediately after each notify (new entries always available), causing a
-            // tight loop of notify -> wait -> callback -> notify without any backpressure
-            // (unlike push mode where sendEntries blocks until RPC response).
-            final long nowMs = Utils.monotonicMs();
-            final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
-
-            if (!redundantNotify && !tooFrequent) {
+            if (!redundantNotify) {
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
-                this.lastNotifySendTimeMs = nowMs;
                 LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
                     this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
 
@@ -1634,7 +1624,12 @@ public class Replicator implements ThreadId.OnError {
                 doUnlock = false;
                 return;
             }
-            waitMoreEntries(nextIndex);
+            // Wait on the leader's current lastLogIndex (== hintIndex), NOT on the follower's
+            // lagging nextIndex. Waiting on nextIndex-1 makes notifyOnNewLog fire the callback
+            // immediately whenever the follower is behind, producing a notify -> wait -> callback
+            // -> notify busy loop that burns CPU. Waiting on hintIndex registers a real waiter
+            // that only fires when a genuinely new entry is appended, so we notify once per batch.
+            waitMoreEntries(hintIndex + 1);
             doUnlock = false;
         } finally {
             if (doUnlock) {
