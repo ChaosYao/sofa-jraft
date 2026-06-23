@@ -1256,6 +1256,22 @@ public class Replicator implements ThreadId.OnError {
                 r.lastRpcSendTimestamp = rpcSendTime;
             }
             r.startHeartbeatTimer(startTimeMs);
+            // Pull-mode liveness backstop: the notify send path arms no waiter, so a lost or
+            // dropped PullAck can leave this follower stalled with nothing to re-drive it. On each
+            // heartbeat tick, if the follower still lags, re-drive replication here instead of
+            // waiting: install a snapshot if it fell behind compaction, otherwise force one notify
+            // (reset the dedup hint so notifyNextIndex takes the send path, not waitMoreEntries).
+            if (r.raftOptions.isEnableReplicatorNotify()
+                && r.options.getLogManager().getLastLogIndex() >= r.nextIndex) {
+                doUnlock = false;
+                if (r.nextIndex < r.options.getLogManager().getFirstLogIndex()) {
+                    r.installSnapshot();
+                } else {
+                    r.lastNotifyHintIndex = -1;
+                    r.notifyNextIndex(r.nextIndex);
+                }
+                return;
+            }
         } finally {
             if (doUnlock) {
                 id.unlock();
