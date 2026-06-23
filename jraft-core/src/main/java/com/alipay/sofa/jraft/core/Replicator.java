@@ -96,12 +96,6 @@ public class Replicator implements ThreadId.OnError {
     /** Last notify RPC content; skip send when leader {@code hintIndex} and term are unchanged. */
     private long                             lastNotifyHintIndex    = -1;
     private long                             lastNotifyTerm         = -1;
-    /** Timestamp of last notify RPC sent; used to throttle notify frequency. */
-    private long                             lastNotifySendTimeMs   = 0;
-    /** Minimum interval between notify RPCs in milliseconds. */
-    private static final long                NOTIFY_MIN_INTERVAL_MS = 1;
-    /** True while a notify RPC is in-flight; suppress further notifies until the response returns. */
-    private volatile boolean                 notifyInFlight         = false;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -1011,23 +1005,6 @@ public class Replicator implements ThreadId.OnError {
         RpcUtils.runInThread(() -> onBlockTimeoutInNewThread(arg));
     }
 
-    /**
-     * Called by the leader when a PullAck is received from a follower.
-     * Updates nextIndex and kicks off the next notify cycle (or waits if caught up).
-     */
-    static void onPullAck(final ThreadId id, final long lastLogIndex) {
-        if (id == null) {
-            return;
-        }
-        final Replicator r = (Replicator) id.lock();
-        if (r == null) {
-            return;
-        }
-        r.waitId = -1;
-        r.nextIndex = lastLogIndex + 1;
-        r.notifyNextIndex(r.nextIndex);
-    }
-
     void block(final long startTimeMs, @SuppressWarnings("unused") final int errorCode) {
         // TODO: Currently we don't care about error_code which indicates why the
         // very RPC fails. To make it better there should be different timeout for
@@ -1619,19 +1596,16 @@ public class Replicator implements ThreadId.OnError {
             rb.setData(ByteString.EMPTY);
             final AppendEntriesRequest request = rb.build();
 
+            // hintIndex is the leader's current lastLogIndex (see fillCommonFields); it tells the
+            // follower how far to pull. Once we have notified for this hintIndex there is nothing
+            // more to announce until the leader appends a newer entry.
             final long hintIndex = request.getHintIndex();
             final long term = request.getTerm();
             final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
 
-            final long nowMs = Utils.monotonicMs();
-            final boolean tooFrequent = (nowMs - this.lastNotifySendTimeMs) < NOTIFY_MIN_INTERVAL_MS;
-
-            if (!redundantNotify && !tooFrequent && !this.notifyInFlight) {
-                // Send notify; backpressure comes from PullAck — onPullAck() drives the next cycle.
+            if (!redundantNotify) {
                 this.lastNotifyHintIndex = hintIndex;
                 this.lastNotifyTerm = term;
-                this.lastNotifySendTimeMs = nowMs;
-                this.notifyInFlight = true;
                 LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
                     this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
 
@@ -1640,24 +1614,24 @@ public class Replicator implements ThreadId.OnError {
 
                         @Override
                         public void run(final Status status) {
-                            notifyInFlight = false;
+                            // Notify response callback - no logging needed
                         }
                     });
-                // Do NOT call waitMoreEntries here: the next cycle is triggered by onPullAck()
-                // after the follower has pulled and confirmed. This provides the same backpressure
-                // as push mode's sendEntries() waiting for the RPC response.
-            } else if (redundantNotify) {
-                // No new entries beyond what follower already knows — wait for more.
-                if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
-                    installSnapshot();
-                    doUnlock = false;
-                    return;
-                }
-                waitMoreEntries(nextIndex);
-                doUnlock = false;
             }
-            // tooFrequent || notifyInFlight: a notify is already in-flight;
-            // onPullAck() will drive the next cycle when the follower responds.
+
+            if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
+                installSnapshot();
+                doUnlock = false;
+                return;
+            }
+            // Always arm a backstop waiter on the leader's current lastLogIndex (== hintIndex). This
+            // is the liveness driver: it fires only when a genuinely new entry is appended, so there
+            // is no busy loop, and the next notify cycle can never be permanently dropped (the former
+            // PullAck-only drive stalled when the ack raced inside the notify throttle window). The
+            // follower self-drains to hintIndex via its own pull loop, so one notify per new batch is
+            // enough. PullAck now serves only commit accounting (ballotBox.commitAt), not liveness.
+            waitMoreEntries(hintIndex + 1);
+            doUnlock = false;
         } finally {
             if (doUnlock) {
                 this.id.unlock();

@@ -2514,13 +2514,9 @@ public class NodeImpl implements Node, RaftServerService {
                 lastLogIndex, followerId);
         }
 
-        // Drive next notify cycle: either send notify if new entries arrived, or waitMoreEntries.
-        // This provides backpressure equivalent to push mode's sendEntries() RTT.
-        final ThreadId rid = this.replicatorGroup.getReplicator(followerId);
-        if (rid != null) {
-            Replicator.onPullAck(rid, lastLogIndex);
-        }
-
+        // PullAck is used only for commit accounting (above). The next notify cycle is driven by the
+        // replicator's waitMoreEntries backstop in notifyNextIndex, which fires when new entries are
+        // appended — so a raced/lost PullAck can no longer stall replication to this follower.
         return PullAckResponse.newBuilder().setTerm(this.currTerm).setSuccess(true).build();
     }
 
