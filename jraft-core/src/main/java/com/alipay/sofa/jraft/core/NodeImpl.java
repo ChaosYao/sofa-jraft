@@ -173,6 +173,9 @@ public class NodeImpl implements Node, RaftServerService {
     // Max retry times when applying tasks.
     private static final int                                               MAX_APPLY_RETRY_TIMES    = 3;
 
+    /** Max number of log entries the leader returns for a single pull request in pull-replication mode. */
+    private static final int                                               MAX_PULL_LOG_ENTRIES     = 10;
+
     public static final AtomicInteger                                      GLOBAL_NUM_NODES         = new AtomicInteger(
                                                                                                         0);
 
@@ -2372,7 +2375,10 @@ public class NodeImpl implements Node, RaftServerService {
             final List<RaftOutter.EntryMeta> entriesList = new ArrayList<>();
             final List<ByteBuffer> dataBuffers = new ArrayList<>();
             long currentIndex = nextIndex;
-            final long maxIndex = Math.min(lastLogIndex, nextIndex + this.raftOptions.getMaxEntriesSize());
+            // Cap each pull to at most MAX_PULL_LOG_ENTRIES entries (loop is inclusive from nextIndex),
+            // still bounded by maxEntriesSize and maxBodySize below.
+            final int maxPullEntries = Math.min(this.raftOptions.getMaxEntriesSize(), MAX_PULL_LOG_ENTRIES);
+            final long maxIndex = Math.min(lastLogIndex, nextIndex + maxPullEntries - 1);
             int totalDataSize = 0;
             final int maxBodySize = this.raftOptions.getMaxBodySize();
 
