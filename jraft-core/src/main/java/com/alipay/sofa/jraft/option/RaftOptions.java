@@ -93,9 +93,9 @@ public class RaftOptions implements Copiable<RaftOptions> {
     private boolean        enableReplicatorNotify               = false;
     /**
      * The maximum number of log entries the leader returns for a single pull request in pull-replication mode,
-     * default is 10. Still bounded by {@link #maxEntriesSize} and {@link #maxBodySize}.
+     * default is 30. Still bounded by {@link #maxEntriesSize} and {@link #maxBodySize}.
      */
-    private int            maxPullLogEntries                    = 10;
+    private int            maxPullLogEntries                    = 30;
 
     public int getMaxPullLogEntries() {
         return this.maxPullLogEntries;
