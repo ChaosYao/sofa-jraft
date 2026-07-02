@@ -91,6 +91,19 @@ public class RaftOptions implements Copiable<RaftOptions> {
      * When true, use notify logic instead of direct sendEntries.
      */
     private boolean        enableReplicatorNotify               = false;
+    /**
+     * The maximum number of log entries the leader returns for a single pull request in pull-replication mode,
+     * default is 10. Still bounded by {@link #maxEntriesSize} and {@link #maxBodySize}.
+     */
+    private int            maxPullLogEntries                    = 10;
+
+    public int getMaxPullLogEntries() {
+        return this.maxPullLogEntries;
+    }
+
+    public void setMaxPullLogEntries(final int maxPullLogEntries) {
+        this.maxPullLogEntries = maxPullLogEntries;
+    }
 
     public boolean isStepDownWhenVoteTimedout() {
         return this.stepDownWhenVoteTimedout;
@@ -266,6 +279,7 @@ public class RaftOptions implements Copiable<RaftOptions> {
         raftOptions.setReadOnlyOptions(this.readOnlyOptions);
         raftOptions.setStepDownWhenVoteTimedout(this.stepDownWhenVoteTimedout);
         raftOptions.setEnableReplicatorNotify(this.enableReplicatorNotify);
+        raftOptions.setMaxPullLogEntries(this.maxPullLogEntries);
         return raftOptions;
     }
 
@@ -281,6 +295,7 @@ public class RaftOptions implements Copiable<RaftOptions> {
                + this.disruptorBufferSize + ", disruptorPublishEventWaitTimeoutSecs="
                + this.disruptorPublishEventWaitTimeoutSecs + ", enableLogEntryChecksum=" + this.enableLogEntryChecksum
                + ", readOnlyOptions=" + this.readOnlyOptions + ", stepDownWhenVoteTimedout="
-               + this.stepDownWhenVoteTimedout + ", enableReplicatorNotify=" + this.enableReplicatorNotify + '}';
+               + this.stepDownWhenVoteTimedout + ", enableReplicatorNotify=" + this.enableReplicatorNotify
+               + ", maxPullLogEntries=" + this.maxPullLogEntries + '}';
     }
 }
