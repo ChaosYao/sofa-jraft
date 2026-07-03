@@ -54,6 +54,7 @@ data:
       commonNodeOptions:
         raftOptions:
           enableReplicatorNotify: true
+          maxPullLogEntries: 25   # Max log entries per pull request (pull-replication mode)
       rocksDBOptions:
         dbPath: /data/rhea_db/
       raftDataPath: /data/rhea_raft/
