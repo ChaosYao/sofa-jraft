@@ -160,6 +160,8 @@ public class AtomicRangeGroup {
         nodeOptions.setElectionTimeoutMs(1000);
         // Close cli service
         nodeOptions.setDisableCli(false);
+        // Per-pull entry cap for pull-replication mode, configurable via server.properties (default 25)
+        nodeOptions.getRaftOptions().setMaxPullLogEntries(conf.getMaxPullLogEntries());
         // A snapshot saving would be triggered every 30 seconds
         // nodeOptions.setSnapshotIntervalSecs(30);
         // Parsing Options

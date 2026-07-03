@@ -33,7 +33,8 @@ public class StartupConf {
     private String serverAddress;
     private long   minSlot;
     private long   maxSlot;
-    private int    totalSlots = 1;
+    private int    totalSlots        = 1;
+    private int    maxPullLogEntries = 25;
 
     public int getTotalSlots() {
         return this.totalSlots;
@@ -41,6 +42,14 @@ public class StartupConf {
 
     public void setTotalSlots(int totalSlots) {
         this.totalSlots = totalSlots;
+    }
+
+    public int getMaxPullLogEntries() {
+        return this.maxPullLogEntries;
+    }
+
+    public void setMaxPullLogEntries(int maxPullLogEntries) {
+        this.maxPullLogEntries = maxPullLogEntries;
     }
 
     public long getMinSlot() {
@@ -70,6 +79,7 @@ public class StartupConf {
             this.minSlot = Long.valueOf(props.getProperty("minSlot", "0"));
             this.maxSlot = Long.valueOf(props.getProperty("maxSlot", String.valueOf(Long.MAX_VALUE)));
             this.totalSlots = Integer.valueOf(props.getProperty("totalSlots", "1"));
+            this.maxPullLogEntries = Integer.valueOf(props.getProperty("maxPullLogEntries", "25"));
             return this.verify();
         }
     }
@@ -136,7 +146,7 @@ public class StartupConf {
     public String toString() {
         return "StartupConf [groupId=" + this.groupId + ", dataPath=" + this.dataPath + ", conf=" + this.conf
                + ", serverAddress=" + this.serverAddress + ", minSlot=" + this.minSlot + ", maxSlot=" + this.maxSlot
-               + ", totalSlots=" + this.totalSlots + "]";
+               + ", totalSlots=" + this.totalSlots + ", maxPullLogEntries=" + this.maxPullLogEntries + "]";
     }
 
 }
