@@ -17,6 +17,7 @@ storeEngineOptions:
   commonNodeOptions:
     raftOptions:
       readOnlyOptions: ReadOnlyLeaseBased
+      enableReplicatorNotify: false
   regionEngineOptionsList:
     - { regionId:  1,                      endKey: 01000000 }
     - { regionId:  2, startKey: 01000000,  endKey: 02000000 }

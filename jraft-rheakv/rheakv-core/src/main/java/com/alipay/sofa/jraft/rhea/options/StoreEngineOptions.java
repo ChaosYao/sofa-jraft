@@ -51,7 +51,7 @@ public class StoreEngineOptions {
     private int                       raftRpcCoreThreads            = Math.max(Utils.cpus() << 3, 32);
     private int                       kvRpcCoreThreads              = Math.max(Utils.cpus() << 3, 32);
     // metrics schedule option (seconds), won't start reporter id metricsReportPeriod <= 0
-    private long                      metricsReportPeriod           = TimeUnit.MINUTES.toSeconds(5);
+    private long                      metricsReportPeriod           = 30;
     // the minimum number of keys required to split, less than this value will refuse to split
     private long                      leastKeysOnSplit              = 10000;
 

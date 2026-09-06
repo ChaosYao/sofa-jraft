@@ -1,0 +1,45 @@
+syntax="proto2";
+
+package rheakv.store;
+
+option java_package="com.alipay.sofa.jraft.rhea.cmd.store";
+option java_outer_classname = "RheaKVStoreProto";
+
+// RegionEpoch message
+message RegionEpoch {
+    required int64 conf_ver = 1;
+    required int64 version = 2;
+}
+
+// PutRequest message
+message PutRequest {
+    required int64 region_id = 1;
+    required RegionEpoch region_epoch = 2;
+    required bytes key = 3;
+    required bytes value = 4;
+}
+
+// PutResponse message
+message PutResponse {
+    required int32 error_code = 1;
+    required int64 region_id = 2;
+    required RegionEpoch region_epoch = 3;
+    optional bool value = 4;
+}
+
+// GetRequest message
+message GetRequest {
+    required int64 region_id = 1;
+    required RegionEpoch region_epoch = 2;
+    required bytes key = 3;
+    optional bool read_only_safe = 4 [default = true];
+}
+
+// GetResponse message
+message GetResponse {
+    required int32 error_code = 1;
+    required int64 region_id = 2;
+    required RegionEpoch region_epoch = 3;
+    optional bytes value = 4;
+}
+

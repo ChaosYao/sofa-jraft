@@ -24,11 +24,7 @@ import com.alipay.sofa.jraft.RaftServiceFactory;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.CliServiceImpl;
-import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.option.CliOptions;
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseResponse;
-import com.alipay.sofa.jraft.rhea.cmd.store.RangeSplitRequest;
-import com.alipay.sofa.jraft.rhea.util.StackTraceUtil;
 import com.alipay.sofa.jraft.rpc.CliClientService;
 import com.alipay.sofa.jraft.rpc.RpcClient;
 import com.alipay.sofa.jraft.rpc.impl.AbstractClientService;
@@ -70,25 +66,8 @@ public class DefaultRheaKVCliService implements RheaKVCliService {
 
     @Override
     public Status rangeSplit(final long regionId, final long newRegionId, final String groupId, final Configuration conf) {
-        final PeerId leaderId = new PeerId();
-        final Status st = this.cliService.getLeader(groupId, conf, leaderId);
-        if (!st.isOk()) {
-            throw new IllegalStateException(st.getErrorMsg());
-        }
-        final RangeSplitRequest request = new RangeSplitRequest();
-        request.setRegionId(regionId);
-        request.setNewRegionId(newRegionId);
-        try {
-            final BaseResponse<?> response = (BaseResponse<?>) this.rpcClient.invokeSync(leaderId.getEndpoint(),
-                request, this.opts.getTimeoutMs());
-            if (response.isSuccess()) {
-                return Status.OK();
-            }
-            return new Status(-1, "Fail to range split on region %d, error: %s", regionId, response);
-        } catch (final Exception e) {
-            LOG.error("Fail to range split on exception: {}.", StackTraceUtil.stackTrace(e));
-            return new Status(-1, "fail to range split on region %d", regionId);
-        }
+        // RangeSplit is not supported
+        return new Status(-1, "RangeSplit is not supported");
     }
 
     private void initCli(CliOptions cliOpts) {

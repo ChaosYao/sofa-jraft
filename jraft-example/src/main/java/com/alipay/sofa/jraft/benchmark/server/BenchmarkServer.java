@@ -16,6 +16,7 @@
  */
 package com.alipay.sofa.jraft.benchmark.server;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -35,7 +36,7 @@ public class BenchmarkServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(BenchmarkServer.class);
 
-    public static void main(final String[] args) {
+    public static void main(final String[] args){
         if (args.length < 3) {
             LOG.error("[configPath] are needed.");
         }
@@ -45,12 +46,16 @@ public class BenchmarkServer {
 
         final Node node = new Node(opts);
         node.start();
-
         ConsoleReporter.forRegistry(KVMetrics.metricRegistry()) //
                 .build() //
                 .start(30, TimeUnit.SECONDS);
-
         Runtime.getRuntime().addShutdownHook(new Thread(node::stop));
         LOG.info("BenchmarkServer start OK, options: {}", opts);
+        try {
+            new CountDownLatch(1).await();
+        } catch (Exception e) {
+            ///
+        }
+
     }
 }

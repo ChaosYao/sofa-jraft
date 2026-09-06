@@ -93,6 +93,9 @@ public class Replicator implements ThreadId.OnError {
     private volatile long                    heartbeatCounter       = 0;
     private volatile long                    appendEntriesCounter   = 0;
     private volatile long                    installSnapshotCounter = 0;
+    /** Last notify RPC content; skip send when leader {@code hintIndex} and term are unchanged. */
+    private long                             lastNotifyHintIndex    = -1;
+    private long                             lastNotifyTerm         = -1;
     protected Stat                           statInfo               = new Stat();
     private ScheduledFuture<?>               blockTimer;
 
@@ -782,8 +785,8 @@ public class Replicator implements ThreadId.OnError {
                 this.heartbeatInFly = this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request,
                     this.options.getElectionTimeoutMs() / 2, heartbeatDone);
             } else {
-                // No entries and has empty data means a probe request.
-                // TODO(boyan) refactor, adds a new flag field?
+                // Probe request: set hintIndex to -2
+                rb.setHintIndex(-2);
                 rb.setData(ByteString.EMPTY);
                 final AppendEntriesRequest request = rb.build();
                 // Sending a probe request.
@@ -814,6 +817,7 @@ public class Replicator implements ThreadId.OnError {
         }
     }
 
+    //TODO 组织log entry leader的 processor 可以直接复用
     boolean prepareEntry(final long nextSendingIndex, final int offset, final RaftOutter.EntryMeta.Builder emb,
                          final RecyclableByteBufferList dateBuffer) {
         if (dateBuffer.getCapacity() >= this.raftOptions.getMaxBodySize()) {
@@ -985,8 +989,11 @@ public class Replicator implements ThreadId.OnError {
             // last_index of this followers is less than |next_index - 1|
             r.sendEmptyEntries(false);
         } else if (errCode != RaftError.ESTOP.getNumber()) {
-            // id is unlock in _send_entries
-            r.sendEntries();
+            if (r.raftOptions.isEnableReplicatorNotify()) {
+                r.notifyNextIndex(r.nextIndex);
+            } else {
+                r.sendEntries();
+            }
         } else {
             LOG.warn("Replicator {} stops sending entries.", id);
             id.unlock();
@@ -1233,6 +1240,8 @@ public class Replicator implements ThreadId.OnError {
         }
     }
 
+
+    //TODO 要改 continue send
     @SuppressWarnings("ContinueOrBreakFromFinallyBlock")
     static void onRpcReturned(final ThreadId id, final RequestType reqType, final Status status, final Message request,
                               final Message response, final int seq, final int stateVersion, final long rpcSendTime) {
@@ -1266,6 +1275,7 @@ public class Replicator implements ThreadId.OnError {
         }
 
         boolean continueSendEntries = false;
+        RequestType lastProcessedRequestType = null;
 
         final boolean isLogDebugEnabled = LOG.isDebugEnabled();
         StringBuilder sb = null;
@@ -1319,6 +1329,7 @@ public class Replicator implements ThreadId.OnError {
                     return;
                 }
                 try {
+                    lastProcessedRequestType = queuedPipelinedResponse.requestType;
                     switch (queuedPipelinedResponse.requestType) {
                         case AppendEntries:
                             continueSendEntries = onAppendEntriesReturned(id, inflight, queuedPipelinedResponse.status,
@@ -1348,8 +1359,14 @@ public class Replicator implements ThreadId.OnError {
                 LOG.debug(sb.toString());
             }
             if (continueSendEntries) {
-                // unlock in sendEntries.
-                r.sendEntries();
+                if (r.raftOptions.isEnableReplicatorNotify() 
+                    && lastProcessedRequestType == RequestType.AppendEntries) {
+                    // unlock in notifyNextIndex.
+                    r.notifyNextIndex(r.nextIndex);
+                } else {
+                    // unlock in sendEntries.
+                    r.sendEntries();
+                }
             }
         }
     }
@@ -1380,12 +1397,20 @@ public class Replicator implements ThreadId.OnError {
             r.sendEmptyEntries(false);
             return false;
         }
-        // record metrics
+        // record metrics (only count DATA entries, exclude no-op / configuration)
         if (request.getEntriesCount() > 0) {
-            r.nodeMetrics.recordLatency("replicate-entries", Utils.monotonicMs() - rpcSendTime);
-            r.nodeMetrics.recordSize("replicate-entries-count", request.getEntriesCount());
-            r.nodeMetrics.recordSize("replicate-entries-bytes", request.getData() != null ? request.getData().size()
-                : 0);
+            int dataEntryCount = 0;
+            for (final RaftOutter.EntryMeta entry : request.getEntriesList()) {
+                if (entry.getType() == EnumOutter.EntryType.ENTRY_TYPE_DATA) {
+                    dataEntryCount++;
+                }
+            }
+            if (dataEntryCount > 0) {
+                r.nodeMetrics.recordLatency("replicate-entries", Utils.monotonicMs() - rpcSendTime);
+                r.nodeMetrics.recordSize("replicate-entries-count", dataEntryCount);
+                r.nodeMetrics.recordSize("replicate-entries-bytes",
+                    request.getData() != null ? request.getData().size() : 0);
+            }
         }
 
         final boolean isLogDebugEnabled = LOG.isDebugEnabled();
@@ -1534,6 +1559,13 @@ public class Replicator implements ThreadId.OnError {
         rb.setPrevLogIndex(prevLogIndex);
         rb.setPrevLogTerm(prevLogTerm);
         rb.setCommittedIndex(this.options.getBallotBox().getLastCommittedIndex());
+        // Set hintIndex based on request type:
+        // -1 for heartbeat, -2 for probe, latest log index for notify/append entries
+        if (isHeartbeat) {
+            rb.setHintIndex(-1);
+        } else {
+            rb.setHintIndex(this.options.getLogManager().getLastLogIndex());
+        }
         return true;
     }
 
@@ -1548,6 +1580,62 @@ public class Replicator implements ThreadId.OnError {
             this.statInfo.runningState = RunningState.IDLE;
         } finally {
             this.id.unlock();
+        }
+    }
+
+    /**
+     * Notify next index when enableReplicatorNotify is true.
+     * @param nextIndex next index to notify
+     */
+    void notifyNextIndex(final long nextIndex) {
+        final AppendEntriesRequest.Builder rb = AppendEntriesRequest.newBuilder();
+        fillCommonFields(rb, nextIndex - 1, false);
+
+        boolean doUnlock = true;
+        try {
+            rb.setData(ByteString.EMPTY);
+            final AppendEntriesRequest request = rb.build();
+
+            // hintIndex is the leader's current lastLogIndex (see fillCommonFields); it tells the
+            // follower how far to pull. Once we have notified for this hintIndex there is nothing
+            // more to announce until the leader appends a newer entry.
+            final long hintIndex = request.getHintIndex();
+            final long term = request.getTerm();
+            final boolean redundantNotify = hintIndex == this.lastNotifyHintIndex && term == this.lastNotifyTerm;
+
+            if (!redundantNotify) {
+                this.lastNotifyHintIndex = hintIndex;
+                this.lastNotifyTerm = term;
+                LOG.debug("[NOTIFY-SEND] Replicator {} sending notify to {} nextIndex={} hintIndex={} term={}",
+                    this.options.getPeerId(), this.options.getPeerId().getEndpoint(), nextIndex, hintIndex, term);
+
+                this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
+                    new RpcResponseClosureAdapter<AppendEntriesResponse>() {
+
+                        @Override
+                        public void run(final Status status) {
+                            // Notify response callback - no logging needed
+                        }
+                    });
+            }
+
+            if (nextIndex < this.options.getLogManager().getFirstLogIndex()) {
+                installSnapshot();
+                doUnlock = false;
+                return;
+            }
+            // Always arm a backstop waiter on the leader's current lastLogIndex (== hintIndex). This
+            // is the liveness driver: it fires only when a genuinely new entry is appended, so there
+            // is no busy loop, and the next notify cycle can never be permanently dropped (the former
+            // PullAck-only drive stalled when the ack raced inside the notify throttle window). The
+            // follower self-drains to hintIndex via its own pull loop, so one notify per new batch is
+            // enough. PullAck now serves only commit accounting (ballotBox.commitAt), not liveness.
+            waitMoreEntries(hintIndex + 1);
+            doUnlock = false;
+        } finally {
+            if (doUnlock) {
+                this.id.unlock();
+            }
         }
     }
 
@@ -1628,8 +1716,8 @@ public class Replicator implements ThreadId.OnError {
         }
 
         final AppendEntriesRequest request = rb.build();
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
+        if (LOG.isInfoEnabled()) {
+            LOG.info(
                 "Node {} send AppendEntriesRequest to {} term {} lastCommittedIndex {} prevLogIndex {} prevLogTerm {} logIndex {} count {}",
                 this.options.getNode().getNodeId(), this.options.getPeerId(), this.options.getTerm(),
                 request.getCommittedIndex(), request.getPrevLogIndex(), request.getPrevLogTerm(), nextSendingIndex,
@@ -1644,6 +1732,11 @@ public class Replicator implements ThreadId.OnError {
         final long monotonicSendTimeMs = Utils.monotonicMs();
         final int seq = getAndIncrementReqSeq();
 
+        try {
+            Thread.sleep(10);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         Future<Message> rpcFuture = null;
         try {
             rpcFuture = this.rpcService.appendEntries(this.options.getPeerId().getEndpoint(), request, -1,
@@ -1851,6 +1944,28 @@ public class Replicator implements ThreadId.OnError {
         }
         id.unlock();
         return nextIdx;
+    }
+
+    public static boolean updateNextIndex(final ThreadId id, final long newNextIndex) {
+        final Replicator r = (Replicator) id.lock();
+        if (r == null) {
+            return false;
+        }
+        try {
+            if (newNextIndex > r.nextIndex) {
+                r.nextIndex = newNextIndex;
+                r.hasSucceeded = true;
+                r.setState(State.Replicate);
+                if (r.blockTimer != null) {
+                    r.blockTimer.cancel(false);
+                    r.blockTimer = null;
+                }
+                return true;
+            }
+            return false;
+        } finally {
+            id.unlock();
+        }
     }
 
 }

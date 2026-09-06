@@ -16,30 +16,36 @@
  */
 package com.alipay.sofa.jraft.rhea.cmd.store;
 
+import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
+
 /**
+ * Utility class for converting between protobuf messages and Java objects.
+ *
  * @author jiachun.fjc
  */
-public class RangeSplitRequest extends BaseRequest {
+public final class ProtoConverter {
 
-    private static final long serialVersionUID = 2369343322478279224L;
-
-    private Long              newRegionId;
-
-    public Long getNewRegionId() {
-        return newRegionId;
+    /**
+     * Convert RegionEpoch to RheaKVStoreProto.RegionEpoch
+     */
+    public static RheaKVStoreProto.RegionEpoch toProto(final RegionEpoch epoch) {
+        if (epoch == null) {
+            return null;
+        }
+        return RheaKVStoreProto.RegionEpoch.newBuilder().setConfVer(epoch.getConfVer()).setVersion(epoch.getVersion())
+            .build();
     }
 
-    public void setNewRegionId(Long newRegionId) {
-        this.newRegionId = newRegionId;
+    /**
+     * Convert RheaKVStoreProto.RegionEpoch to RegionEpoch
+     */
+    public static RegionEpoch fromProto(final RheaKVStoreProto.RegionEpoch proto) {
+        if (proto == null || !proto.isInitialized()) {
+            return null;
+        }
+        return new RegionEpoch(proto.getConfVer(), proto.getVersion());
     }
 
-    @Override
-    public byte magic() {
-        return RANGE_SPLIT;
-    }
-
-    @Override
-    public String toString() {
-        return "RangeSplitRequest{" + "newRegionId=" + newRegionId + "} " + super.toString();
+    private ProtoConverter() {
     }
 }

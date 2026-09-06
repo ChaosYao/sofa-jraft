@@ -33,6 +33,8 @@ import com.alipay.sofa.jraft.rpc.impl.cli.TransferLeaderRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.AppendEntriesRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.GetFileRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.InstallSnapshotRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.PullAckRequestProcessor;
+import com.alipay.sofa.jraft.rpc.impl.core.PullLogEntryRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.ReadIndexRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.RequestVoteRequestProcessor;
 import com.alipay.sofa.jraft.rpc.impl.core.TimeoutNowRequestProcessor;
@@ -105,6 +107,8 @@ public class RaftRpcServerFactory {
         rpcServer.registerProcessor(new PingRequestProcessor());
         rpcServer.registerProcessor(new TimeoutNowRequestProcessor(raftExecutor));
         rpcServer.registerProcessor(new ReadIndexRequestProcessor(raftExecutor));
+        rpcServer.registerProcessor(new PullLogEntryRequestProcessor(raftExecutor));
+        rpcServer.registerProcessor(new PullAckRequestProcessor(raftExecutor));
         // raft cli service
         rpcServer.registerProcessor(new AddPeerRequestProcessor(cliExecutor));
         rpcServer.registerProcessor(new RemovePeerRequestProcessor(cliExecutor));

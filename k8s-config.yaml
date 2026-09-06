@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: raft-demo
 ---
-# Headless Service：为 StatefulSet 提供稳定的 Pod DNS
+# Headless Service: provides stable Pod DNS for the StatefulSet
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,6 +11,7 @@ metadata:
   namespace: raft-demo
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   selector:
     app: raft
   ports:
@@ -18,8 +19,8 @@ spec:
       port: 8181
       targetPort: 8181
 ---
-# （可选）对外暴露，一个端口映射到 8181
-# 需要从宿主或集群外访问时再启用
+# (Optional) Expose the service externally via NodePort
+# Enable this only when access from the host or outside the cluster is required
 apiVersion: v1
 kind: Service
 metadata:
@@ -35,7 +36,8 @@ spec:
       targetPort: 8181
       nodePort: 30080
 ---
-# 配置：把 initialServerList 放在 node.yaml 里（使用 StatefulSet 固定主机名）
+# Configuration: put initialServerList into node.yaml
+# Use StatefulSet stable hostnames
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -43,20 +45,23 @@ metadata:
   namespace: raft-demo
 data:
   node.yaml: |
-    ##RheaKVStoreOptions
+    ## RheaKVStoreOptions
     ---
     clusterName: rhea_example
     placementDriverOptions:
-      fake: true          # 无 PD 模式
+      fake: true          # PD-less mode
     storeEngineOptions:
+      commonNodeOptions:
+        raftOptions:
+          enableReplicatorNotify: true
       rocksDBOptions:
         dbPath: /data/rhea_db/
       raftDataPath: /data/rhea_raft/
       serverAddress:
-        ip: 0.0.0.0       # 容器内监听所有网卡
-        port: 8181        # RheaKV 对外端口（客户端 & peers 访问这个）
-    # 3 个副本的固定 FQDN（StatefulSet+Headless 服务）
-    initialServerList: raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181
+        ip: 0.0.0.0       # Listen on all interfaces inside the container
+        port: 8181        # RheaKV exposed port (used by clients & peers)
+    # Fixed FQDNs for 3 replicas (StatefulSet + Headless Service)
+    initialServerList: "raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181"
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -66,7 +71,7 @@ metadata:
 spec:
   serviceName: raft
   replicas: 3
-  podManagementPolicy: Parallel
+  podManagementPolicy: OrderedReady
   selector:
     matchLabels:
       app: raft
@@ -74,6 +79,11 @@ spec:
     metadata:
       labels:
         app: raft
+      annotations:
+        # (Optional) If Istio is introduced later, exclude ICN/NFD ports here
+        # to avoid service mesh interference
+        # traffic.sidecar.istio.io/excludeOutboundPorts: "6363"
+        {}
     spec:
       terminationGracePeriodSeconds: 10
       affinity:
@@ -85,22 +95,57 @@ spec:
                     operator: In
                     values: ["raft"]
               topologyKey: "kubernetes.io/hostname"
+
+      # === Added: iptables rules to force all ingress/egress on port 8181
+      # === to pass through the adapter ===
+      initContainers:
+        - name: setup-iptables
+          image: alpine:3.19
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eux
+              apk add --no-cache iptables
+
+              APP_PORT=8181
+              ADAPTER_PORT=19090
+              ADAPTER_UID=10001
+
+              # Inbound: redirect all traffic destined to Pod:8181
+              # to adapter:19090
+              iptables -t nat -A PREROUTING -p tcp --dport ${APP_PORT} -j REDIRECT --to-ports ${ADAPTER_PORT}
+
+              # Outbound: redirect connections initiated by processes in the Pod
+              # targeting peer:8181 to adapter:19090 as well
+              # Must exclude:
+              # 1) localhost (adapter forwarding back to localhost:8181)
+              # 2) traffic originating from the adapter itself (to avoid loops)
+              iptables -t nat -A OUTPUT -p tcp --dport ${APP_PORT} -d 127.0.0.1/32 -j RETURN
+              iptables -t nat -A OUTPUT -p tcp --dport ${APP_PORT} -m owner --uid-owner ${ADAPTER_UID} -j RETURN
+              iptables -t nat -A OUTPUT -p tcp --dport ${APP_PORT} -j REDIRECT --to-ports ${ADAPTER_PORT}
+
+              iptables -t nat -S
+
       containers:
         - name: raft
-          image: raft-demo:1.0   # <<< 改成你的镜像
+          image: raft-demo:latest1   # <<< Replace with your own image
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8181
               name: rpc
-          # 建议镜像的 ENTRYPOINT 仅指向可执行（不写死参数）；
-          # 这里通过 args 传入：角色 + 配置路径
+          # It is recommended that the image ENTRYPOINT only specifies the executable
+          # and does not hard-code arguments.
+          # Arguments are passed here: role + config path
           args: ["server","/conf/node.yaml"]
           volumeMounts:
             - name: conf
               mountPath: /conf
             - name: data
               mountPath: /data
-          # （可选）基础健康检查：TCP 探测 8081
+          # (Optional) Basic health check: TCP probe on port 8181
           readinessProbe:
             tcpSocket: { port: 8181 }
             initialDelaySeconds: 100
@@ -109,11 +154,44 @@ spec:
             tcpSocket: { port: 8181 }
             initialDelaySeconds: 100
             periodSeconds: 150
-      # 配置挂载（ConfigMap）+ 数据持久化（每 Pod 一个 PVC）
+
+        # === Added: your gRPC <-> ICN adapter sidecar ===
+        # Notes:
+        # - The adapter does NOT bind to port 8181 (to avoid conflicts).
+        # - It listens on port 19090.
+        # - All ingress/egress traffic on 8181 is redirected to 19090 via iptables.
+        - name: grpc-icn-adapter
+          image: raft-proxy:latest   # <<< Replace with your adapter image
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 19090
+              name: adapter
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:19090"
+            # Passthrough upstream: forward back to raft server inside the same Pod
+            # Note: iptables explicitly allows traffic to 127.0.0.1:8181
+            - name: UPSTREAM_ADDR
+              value: "127.0.0.1:8181"
+            # Example: control which RPC methods are intercepted via method or header
+            - name: INTERCEPT_METHODS
+              value: "/your.Service/MethodA,/your.Service/MethodB"
+            # ICN parameters (placeholders, to be filled later)
+            - name: NFD_HOST
+              value: "nfd"
+            - name: NFD_PORT
+              value: "6363"
+
+      # ConfigMap mount + persistent storage (one PVC per Pod)
       volumes:
         - name: conf
           configMap:
             name: raft-config
+
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -122,9 +200,7 @@ spec:
         resources:
           requests:
             storage: 1Gi
-
 ---
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -132,21 +208,26 @@ metadata:
   namespace: raft-demo
 data:
   client.yaml: |
-    ##RheaClientOptions
-        #    ---
-        #    clusterName: rhea_example
-        #    # 客户端只需知道 server 列表（使用 StatefulSet+Headless 的稳定 FQDN）
-        #    initialServerList: raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181
-        #    # 可选：RPC/超时/重试等（按你的程序键名调整）
-        #    rpc:
-        #      connectTimeoutMillis: 3000
-        #      requestTimeoutMillis: 5000
-        #
-        #
+    ## RheaClientOptions
+    ---
+    clusterName: rhea_example
+    initialServerList: "raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181"
+    placementDriverOptions:
+      fake: true          # PD-less mode
+      regionRouteTableOptionsList:
+        - { regionId: -1, initialServerList: "raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181" }
 
+        # Client only needs to know the server list
+        # Stable FQDNs provided by StatefulSet + Headless Service
+      initialServerList: "raft-0.raft.raft-demo.svc.cluster.local:8181,raft-1.raft.raft-demo.svc.cluster.local:8181,raft-2.raft.raft-demo.svc.cluster.local:8181"
+
+        # Optional: RPC / timeout / retry configurations
+        # Adjust the keys according to your program
+        # rpc:
+        #   connectTimeoutMillis: 3000
+        #   requestTimeoutMillis: 5000
 ---
-
-apiVersion: app/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: raft-client
@@ -156,21 +237,21 @@ spec:
   selector:
     matchLabels:
       app: raft-client
-    template:
-      metadata:
-        labels:
-          app: raft-client
-      spec:
-        terminationGracePeriodSeconds: 10
-        containers:
-          - name: raft-client
-            image: raft-demo:1.0
-            imagePullPolicy: IfNotPresent
-            args: ["client", "/conf/client.yaml", "1", "1", "1", "1024"]
-            volumeMounts:
-              - name: conf
-                mountPath: /conf
-        volumes:
-          - name: conf
-            configMap:
-              name: raft-client-config
+  template:
+    metadata:
+      labels:
+        app: raft-client
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: raft-client
+          image: raft-demo:latest1
+          imagePullPolicy: IfNotPresent
+          args: ["client", "/conf/client.yaml", "1", "1", "0", "1024", "20"]
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+      volumes:
+        - name: conf
+          configMap:
+            name: raft-client-config

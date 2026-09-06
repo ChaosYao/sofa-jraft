@@ -25,6 +25,7 @@ import io.grpc.util.MutableHandlerRegistry;
 
 import com.alipay.sofa.jraft.rpc.RaftRpcFactory;
 import com.alipay.sofa.jraft.rpc.RpcClient;
+import com.alipay.sofa.jraft.rpc.RpcRequests;
 import com.alipay.sofa.jraft.rpc.RpcResponseFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.util.Endpoint;
@@ -53,6 +54,13 @@ public class GrpcRaftRpcFactory implements RaftRpcFactory {
     static final RpcResponseFactory RESPONSE_FACTORY               = new GrpcResponseFactory();
 
     final Map<String, Message>      parserClasses                  = new ConcurrentHashMap<>();
+
+    {
+        parserClasses.put(RpcRequests.PullLogEntryRequest.class.getName(),
+            RpcRequests.PullLogEntryRequest.getDefaultInstance());
+        parserClasses.put(RpcRequests.PullAckRequest.class.getName(), RpcRequests.PullAckRequest.getDefaultInstance());
+    }
+
     final MarshallerRegistry        defaultMarshallerRegistry      = new MarshallerRegistry() {
 
                                                                        @Override

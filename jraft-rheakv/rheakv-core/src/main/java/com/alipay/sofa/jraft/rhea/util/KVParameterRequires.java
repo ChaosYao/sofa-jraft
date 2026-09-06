@@ -18,7 +18,6 @@ package com.alipay.sofa.jraft.rhea.util;
 
 import java.util.List;
 
-import com.alipay.sofa.jraft.rhea.cmd.store.BaseRequest;
 import com.alipay.sofa.jraft.rhea.errors.Errors;
 import com.alipay.sofa.jraft.rhea.errors.InvalidParameterException;
 import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
@@ -29,8 +28,10 @@ import com.alipay.sofa.jraft.rhea.metadata.RegionEpoch;
  */
 public final class KVParameterRequires {
 
-    public static void requireSameEpoch(final BaseRequest request, final RegionEpoch current) {
-        RegionEpoch requestEpoch = request.getRegionEpoch();
+    public static void requireSameEpoch(final RegionEpoch requestEpoch, final RegionEpoch current) {
+        if (requestEpoch == null) {
+            throw Errors.INVALID_REGION_EPOCH.exception();
+        }
         if (current.equals(requestEpoch)) {
             return;
         }
